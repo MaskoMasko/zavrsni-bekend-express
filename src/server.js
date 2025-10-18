@@ -12,6 +12,47 @@ const prisma = new PrismaClient();
 const app = express();
 app.use(express.json());
 
+const yearSemesters = { 1: [1, 2], 2: [3, 4], 3: [5, 6] };
+const ODDS = [1, 3, 5];
+const EVENS = [2, 4, 6];
+
+function ensureYear(enrolledYear) {
+  const y = Number(enrolledYear);
+  if (![1, 2, 3].includes(y)) {
+    throw new Error('enrolledYear mora biti 1, 2 ili 3');
+  }
+  return y;
+}
+function ensureModule(enrolledYear, module) {
+  if (enrolledYear === 3) return module || null;
+  return null;
+}
+
+async function getStudentStatusSets(studentId) {
+  // Vrati skupove položenih i padnutih (po id-u), te sve upise
+  const enrollments = await prisma.studentCourse.findMany({
+    where: { studentId },
+    include: { course: { select: { id: true, semester: true, year: true, prerequisiteId: true } } },
+  });
+  const passedSet = new Set(enrollments.filter(e => e.status === 'PASSED').map(e => e.courseId));
+  const failedSet = new Set(enrollments.filter(e => e.status === 'FAILED').map(e => e.courseId));
+  return { passedSet, failedSet, enrollments };
+}
+
+async function getCoursesMaps() {
+  const courses = await prisma.course.findMany();
+  const coursesById = Object.fromEntries(courses.map(c => [c.id, c]));
+  const coursesBySem = courses.reduce((acc, c) => {
+    acc[c.semester] = acc[c.semester] || [];
+    acc[c.semester].push(c);
+    return acc;
+  }, {});
+  return { courses, coursesById, coursesBySem };
+}
+
+function isWinterSem(s) { return ODDS.includes(s); }
+function isSummerSem(s) { return EVENS.includes(s); }
+
 const UPLOAD_ROOT = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(UPLOAD_ROOT)) fs.mkdirSync(UPLOAD_ROOT, { recursive: true });
 
@@ -79,10 +120,6 @@ function issueJwt(student) {
 }
 
 /* -------- Helpers za upise i planiranje ACTIVE -------- */
-
-const yearSemesters = { 1: [1, 2], 2: [3, 4], 3: [5, 6] };
-const ODDS = [1, 3, 5];
-const EVENS = [2, 4, 6];
 
 function ensureYear(enrolledYear) {
   const y = Number(enrolledYear);
@@ -430,6 +467,7 @@ app.post('/auth/register', async (req, res) => {
         enrolledYear: 1,
         repeatingYear: false,
         module: null,
+        enrollingThisYear: true, // novi student se upisuje u tekuću godinu
       },
       select: {
         id: true,
@@ -440,17 +478,16 @@ app.post('/auth/register', async (req, res) => {
         enrolledYear: true,
         repeatingYear: true,
         module: true,
+        enrollingThisYear: true,
         createdAt: true,
         updatedAt: true,
       },
     });
 
     const token = issueJwt(student);
-
     res.status(201).json({ user: student, token });
   } catch (err) {
     console.error('Greška pri registraciji:', err);
-    // Unique email/jmbag collision fallback
     if (err?.code === 'P2002') {
       return res.status(409).json({ error: 'Email ili JMBAG već postoji' });
     }
@@ -565,7 +602,6 @@ app.patch('/students/:id', async (req, res) => {
     const existing = await prisma.student.findUnique({ where: { id: studentId } });
     if (!existing) return res.status(404).json({ error: 'Student nije pronađen' });
 
-    // Ulaz
     let { enrolledYear, repeatingYear, module } = req.body || {};
     if (enrolledYear !== undefined) enrolledYear = ensureYear(enrolledYear);
     if (repeatingYear !== undefined) repeatingYear = Boolean(repeatingYear);
@@ -573,15 +609,21 @@ app.patch('/students/:id', async (req, res) => {
     const nextRepeat = repeatingYear ?? existing.repeatingYear;
     const nextModule = ensureModule(nextYear, module ?? existing.module);
 
-    // Transakcija: update + brisanje starih ACTIVE + dodjela novih ACTIVE
-    const result = await prisma.$transaction(async (tx) => {
-      // 1) Update studenta
-      const updated = await tx.student.update({
+    const [semOdd, semEven] = yearSemesters[nextYear];
+
+    // Transakcija: update studenta, očisti ACTIVE u semestrima nove godine, resetiraj korake 2 i 3
+    const updated = await prisma.$transaction(async (tx) => {
+      const upd = await tx.student.update({
         where: { id: studentId },
         data: {
           enrolledYear: nextYear,
           repeatingYear: nextRepeat,
           module: nextModule,
+          // Korak 1 završen; resetiraj ostale korake i završno stanje
+          enrollmentYearSelected: true,
+          enrollmentCoursesSelected: false,
+          enrollmentDocumentsSubmitted: false,
+          enrollmentCompleted: false,
         },
         select: {
           id: true,
@@ -592,19 +634,16 @@ app.patch('/students/:id', async (req, res) => {
           enrolledYear: true,
           repeatingYear: true,
           module: true,
+          enrollmentYearSelected: true,
+          enrollmentCoursesSelected: true,
+          enrollmentDocumentsSubmitted: true,
+          enrollmentCompleted: true,
           createdAt: true,
           updatedAt: true,
         },
       });
 
-      // 2) Priprema: mape kolegija i povijest studenta
-      const { courses, coursesBySem, coursesById } = await getCoursesMaps();
-      const { passedSet, failedBySem } = await getStudentHistory(studentId);
-
-      // 3) Odredi semestre trenutne godine
-      const [semOdd, semEven] = yearSemesters[updated.enrolledYear];
-
-      // 4) Očisti postojeće ACTIVE za semOdd i semEven (prije nove dodjele)
+      // Očisti postojeće ACTIVE iz semestara nove godine (da ne ostanu stari odabiri)
       await tx.studentCourse.deleteMany({
         where: {
           studentId,
@@ -613,71 +652,12 @@ app.patch('/students/:id', async (req, res) => {
         },
       });
 
-      // 5) Retake kandidati: svi FAIL iz prijašnjih semestara iste parnosti
-      const priorOdds = ODDS.filter(s => s < semOdd);
-      const priorEvens = EVENS.filter(s => s < semEven);
-
-      const retakeOddIds = [
-        ...priorOdds.flatMap(s => failedBySem[s] || []),
-        ...(updated.repeatingYear ? (failedBySem[semOdd] || []) : []),
-      ];
-      const retakeEvenIds = [
-        ...priorEvens.flatMap(s => failedBySem[s] || []),
-        ...(updated.repeatingYear ? (failedBySem[semEven] || []) : []),
-      ];
-
-      // 6) Novi kolegiji: svi iz semestra tekuće godine
-      const newOddIds = (coursesBySem[semOdd] || []).map(c => c.id);
-      const newEvenIds = (coursesBySem[semEven] || []).map(c => c.id);
-
-      // 7) Izgradi plan ACTIVE po semestru, uz limite i preduvjete
-      const planOdd = fillSemesterActivePlan({
-        student: updated,
-        semester: semOdd,
-        retakeCourseIds: retakeOddIds,
-        newCourseIds: newOddIds,
-        passedSet,
-        coursesById,
-      });
-      const planEven = fillSemesterActivePlan({
-        student: updated,
-        semester: semEven,
-        retakeCourseIds: retakeEvenIds,
-        newCourseIds: newEvenIds,
-        passedSet,
-        coursesById,
-      });
-
-      const toCreate = [...planOdd, ...planEven].map(p => ({
-        studentId: updated.id,
-        courseId: p.courseId,
-        status: p.status,
-        assignedYear: updated.enrolledYear,
-        assignedSemester: p.assignedSemester,
-      }));
-
-      if (toCreate.length) {
-        await tx.studentCourse.createMany({ data: toCreate });
-      }
-
-      // 8) Vratimo sažetak
-      const activeSummary = {
-        [semOdd]: {
-          count: planOdd.length,
-          ects: planOdd.reduce((sum, p) => sum + (coursesById[p.courseId]?.ects || 0), 0),
-        },
-        [semEven]: {
-          count: planEven.length,
-          ects: planEven.reduce((sum, p) => sum + (coursesById[p.courseId]?.ects || 0), 0),
-        },
-      };
-
-      return { updated, assignedActive: { odd: planOdd, even: planEven }, activeSummary };
+      return upd;
     });
 
-    res.json(result);
+    res.json({ updated, message: 'Korak 1 završen. ACTIVE predmeti su resetirani za novu godinu.' });
   } catch (err) {
-    console.error('Greška pri ažuriranju studenta:', err);
+    console.error('PATCH /students/:id error:', err);
     if (err?.message?.includes('enrolledYear')) {
       return res.status(400).json({ error: err.message });
     }
@@ -906,6 +886,354 @@ app.post('/students/:id/enrollment/submit', async (req, res) => {
     });
   } catch (err) {
     console.error('Greška pri potvrdi upisa:', err);
+    res.status(500).json({ error: 'Interna greška servera' });
+  }
+});
+
+app.get('/students/leaderboard', async (req, res) => {
+  const yearParam = Number(req.query.year);
+  if (![1, 2, 3].includes(yearParam)) {
+    return res.status(400).json({ error: 'Parametar year mora biti 1, 2 ili 3' });
+  }
+
+  try {
+    // 1) Studenti koji se upisuju u zadanu godinu
+    const students = await prisma.student.findMany({
+      where: {
+        enrolledYear: yearParam,
+        enrollingThisYear: true,
+      },
+      select: {
+        id: true,
+        jmbag: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        enrolledYear: true,
+        repeatingYear: true,
+        module: true,
+        enrollingThisYear: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!students.length) {
+      return res.json({ year: yearParam, totalStudents: 0, groups: {} });
+    }
+
+    const studentIds = students.map(s => s.id);
+
+    // 2) Dohvati sve upise tih studenata s course ects (za zbroj PASSED)
+    const enrollments = await prisma.studentCourse.findMany({
+      where: { studentId: { in: studentIds } },
+      select: {
+        studentId: true,
+        status: true,
+        course: { select: { ects: true } },
+      },
+    });
+
+    // 3) Zbroji ECTS za PASSED po studentu
+    const ectsByStudent = new Map(); // id -> ects sum
+    const countsByStudent = new Map(); // id -> { passed, failed, active }
+    for (const e of enrollments) {
+      const cs = countsByStudent.get(e.studentId) || { passed: 0, failed: 0, active: 0 };
+      if (e.status === 'PASSED') {
+        cs.passed += 1;
+        const prev = ectsByStudent.get(e.studentId) || 0;
+        ectsByStudent.set(e.studentId, prev + (e.course?.ects || 0));
+      } else if (e.status === 'FAILED') {
+        cs.failed += 1;
+      } else if (e.status === 'ACTIVE') {
+        cs.active += 1;
+      }
+      countsByStudent.set(e.studentId, cs);
+    }
+
+    // 4) Grupiraj po modulu (null -> 'UNASSIGNED')
+    const groups = {};
+    for (const s of students) {
+      const key = s.module || 'UNASSIGNED';
+      const totalEcts = ectsByStudent.get(s.id) || 0;
+      const counts = countsByStudent.get(s.id) || { passed: 0, failed: 0, active: 0 };
+      const entry = {
+        id: s.id,
+        jmbag: s.jmbag,
+        firstName: s.firstName,
+        lastName: s.lastName,
+        email: s.email,
+        enrolledYear: s.enrolledYear,
+        repeatingYear: s.repeatingYear,
+        module: s.module,
+        enrollingThisYear: s.enrollingThisYear,
+        stats: {
+          ectsPassedTotal: totalEcts,
+          passedCount: counts.passed,
+          failedCount: counts.failed,
+          activeCount: counts.active,
+        },
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+      };
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(entry);
+    }
+
+    // 5) Rangiraj svaku grupu po ectsPassedTotal (desc), zatim po prezimenu
+    for (const key of Object.keys(groups)) {
+      groups[key].sort((a, b) => {
+        if (b.stats.ectsPassedTotal !== a.stats.ectsPassedTotal) {
+          return b.stats.ectsPassedTotal - a.stats.ectsPassedTotal;
+        }
+        return a.lastName.localeCompare(b.lastName);
+      });
+    }
+
+    res.json({
+      year: yearParam,
+      totalStudents: students.length,
+      groups,
+    });
+  } catch (err) {
+    console.error('Greška /students/leaderboard:', err);
+    res.status(500).json({ error: 'Interna greška servera' });
+  }
+});
+
+app.patch('/students/:id/enrollment/courses', async (req, res) => {
+  const studentId = Number(req.params.id);
+  if (!Number.isInteger(studentId)) {
+    return res.status(400).json({ error: 'Neispravan studentId' });
+  }
+
+  try {
+    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!student) return res.status(404).json({ error: 'Student nije pronađen' });
+    if (!student.enrollmentYearSelected) {
+      return res.status(400).json({ error: 'Korak 1 nije dovršen: godina nije potvrđena.' });
+    }
+
+    const { winterCourseIds = [], summerCourseIds = [] } = req.body || {};
+    if (!Array.isArray(winterCourseIds) || !Array.isArray(summerCourseIds)) {
+      return res.status(400).json({ error: 'winterCourseIds i summerCourseIds moraju biti polja' });
+    }
+    if (winterCourseIds.length > 6 || summerCourseIds.length > 6) {
+      return res.status(400).json({ error: 'Maksimalno 6 kolegija po semestru' });
+    }
+
+    // Nema duplikata među svim odabirima
+    const allIds = [...winterCourseIds, ...summerCourseIds];
+    const uniq = new Set(allIds);
+    if (uniq.size !== allIds.length) {
+      return res.status(400).json({ error: 'Duplikati u odabranim kolegijima nisu dopušteni' });
+    }
+
+    const [semOdd, semEven] = yearSemesters[student.enrolledYear];
+    const { coursesById } = await getCoursesMaps();
+    const { passedSet, failedSet } = await getStudentStatusSets(studentId);
+
+    // Validacija svaki courseId
+    const validateCourse = (cid) => {
+      const c = coursesById[cid];
+      if (!c) throw new Error(`Nepostojeći kolegij id=${cid}`);
+      if (passedSet.has(cid)) throw new Error(`Kolegij "${c.name}" je već položen`);
+      // Pravilo dostupnosti: bez preduvjeta ili preduvjet NIJE u failedSet
+      if (c.prerequisiteId && failedSet.has(c.prerequisiteId)) {
+        throw new Error(`Kolegij "${c.name}" nije dostupan (preduvjet u nepoloženim)`);
+      }
+      return c;
+    };
+
+    const winterCourses = winterCourseIds.map(validateCourse);
+    const summerCourses = summerCourseIds.map(validateCourse);
+
+    // Transakcija: obriši stare ACTIVE za semOdd/semEven i upiši nove ACTIVE
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.studentCourse.deleteMany({
+        where: {
+          studentId,
+          status: 'ACTIVE',
+          assignedSemester: { in: [semOdd, semEven] },
+        },
+      });
+
+      const winterData = winterCourses.map(c => ({
+        studentId,
+        courseId: c.id,
+        status: 'ACTIVE',
+        assignedYear: student.enrolledYear,
+        assignedSemester: semOdd, // zimski ide u current odd semestar
+      }));
+      const summerData = summerCourses.map(c => ({
+        studentId,
+        courseId: c.id,
+        status: 'ACTIVE',
+        assignedYear: student.enrolledYear,
+        assignedSemester: semEven, // ljetni ide u current even semestar
+      }));
+
+      if (winterData.length) await tx.studentCourse.createMany({ data: winterData });
+      if (summerData.length) await tx.studentCourse.createMany({ data: summerData });
+
+      const updated = await tx.student.update({
+        where: { id: studentId },
+        data: {
+          enrollmentCoursesSelected: true,      // korak 2 gotov
+          enrollmentDocumentsSubmitted: false,  // reset ako je bilo prije
+          enrollmentCompleted: false,
+        },
+        select: {
+          id: true, firstName: true, lastName: true, enrolledYear: true,
+          enrollmentYearSelected: true, enrollmentCoursesSelected: true,
+          enrollmentDocumentsSubmitted: true, enrollmentCompleted: true,
+        },
+      });
+
+      return {
+        updated,
+        activeAssigned: {
+          winter: winterCourses.map(c => ({ id: c.id, name: c.name, ects: c.ects })),
+          summer: summerCourses.map(c => ({ id: c.id, name: c.name, ects: c.ects })),
+        },
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('PATCH /students/:id/enrollment/courses error:', err);
+    const msg = err?.message || 'Interna greška servera';
+    res.status(400).json({ error: msg });
+  }
+});
+
+app.post('/students/:id/enrollment/submit', async (req, res) => {
+  const studentId = Number(req.params.id);
+  if (!Number.isInteger(studentId)) {
+    return res.status(400).json({ error: 'Neispravan studentId' });
+  }
+  try {
+    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!student) return res.status(404).json({ error: 'Student nije pronađen' });
+
+    const requiredTypes = ['upisniObrazac', 'uplatnica', 'potvrdaUplatnice'];
+
+    const docs = await prisma.studentDocument.findMany({
+      where: { studentId, type: { in: requiredTypes } },
+      orderBy: [{ uploadedAt: 'desc' }],
+    });
+
+    const latestByType = new Map();
+    for (const d of docs) {
+      if (!latestByType.has(d.type)) latestByType.set(d.type, d);
+    }
+    const missing = requiredTypes.filter(t => !latestByType.has(t));
+    if (missing.length > 0) {
+      return res.status(400).json({ error: 'Nedostaju dokumenti', missing });
+    }
+
+    const toAcceptIds = Array.from(latestByType.values()).map(d => d.id);
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Označi dokumente prihvaćenima
+      await tx.studentDocument.updateMany({
+        where: { id: { in: toAcceptIds } },
+        data: { accepted: true },
+      });
+
+      // Označi korak 3 dovršenim; ako su koraci 1 i 2 gotovi -> completed = true
+      const updated = await tx.student.update({
+        where: { id: studentId },
+        data: {
+          enrollmentDocumentsSubmitted: true,
+          enrollmentCompleted: student.enrollmentYearSelected && student.enrollmentCoursesSelected ? true : false,
+        },
+        select: {
+          id: true, firstName: true, lastName: true, enrolledYear: true,
+          enrollmentYearSelected: true, enrollmentCoursesSelected: true,
+          enrollmentDocumentsSubmitted: true, enrollmentCompleted: true,
+        },
+      });
+
+      return {
+        student: updated,
+        accepted: true,
+        acceptedDocuments: requiredTypes.map(t => {
+          const d = latestByType.get(t);
+          return {
+            id: d.id, type: d.type, filename: d.filename, size: d.size, mime: d.mime,
+            uploadedAt: d.uploadedAt, url: `/uploads/${studentId}/${d.filename}`,
+          };
+        }),
+        message: updated.enrollmentCompleted
+          ? 'Upis završen: svi koraci su uspješno dovršeni.'
+          : 'Dokumenti zaprimljeni, ali upis nije zaključen (provjeri prethodne korake).',
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('Greška pri potvrdi upisa:', err);
+    res.status(500).json({ error: 'Interna greška servera' });
+  }
+});
+
+app.get('/students/leaderboard', async (req, res) => {
+  const yearParam = Number(req.query.year);
+  if (![1, 2, 3].includes(yearParam)) {
+    return res.status(400).json({ error: 'Parametar year mora biti 1, 2 ili 3' });
+  }
+  try {
+    const students = await prisma.student.findMany({
+      where: {
+        enrolledYear: yearParam,
+        enrollmentCompleted: true, // samo dovršeni upisi
+      },
+      select: {
+        id: true, jmbag: true, firstName: true, lastName: true, email: true,
+        enrolledYear: true, repeatingYear: true, module: true,
+        enrollmentCompleted: true, createdAt: true, updatedAt: true,
+      },
+    });
+
+    if (!students.length) {
+      return res.json({ year: yearParam, totalStudents: 0, groups: {} });
+    }
+
+    const studentIds = students.map(s => s.id);
+    const enrollments = await prisma.studentCourse.findMany({
+      where: { studentId: { in: studentIds } },
+      select: { studentId: true, status: true, course: { select: { ects: true } } },
+    });
+
+    const ectsByStudent = new Map();
+    for (const e of enrollments) {
+      if (e.status === 'PASSED') {
+        ectsByStudent.set(e.studentId, (ectsByStudent.get(e.studentId) || 0) + (e.course?.ects || 0));
+      }
+    }
+
+    const groups = {};
+    for (const s of students) {
+      const key = s.module || 'UNASSIGNED';
+      const totalEcts = ectsByStudent.get(s.id) || 0;
+      const entry = {
+        id: s.id, jmbag: s.jmbag, firstName: s.firstName, lastName: s.lastName,
+        email: s.email, enrolledYear: s.enrolledYear, repeatingYear: s.repeatingYear,
+        module: s.module, enrollmentCompleted: s.enrollmentCompleted,
+        stats: { ectsPassedTotal: totalEcts },
+        createdAt: s.createdAt, updatedAt: s.updatedAt,
+      };
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(entry);
+    }
+    for (const key of Object.keys(groups)) {
+      groups[key].sort((a, b) => b.stats.ectsPassedTotal - a.stats.ectsPassedTotal || a.lastName.localeCompare(b.lastName));
+    }
+
+    res.json({ year: yearParam, totalStudents: students.length, groups });
+  } catch (err) {
+    console.error('Greška /students/leaderboard:', err);
     res.status(500).json({ error: 'Interna greška servera' });
   }
 });
