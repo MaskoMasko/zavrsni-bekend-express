@@ -19,6 +19,8 @@ model Student {
     module        String?
     createdAt     DateTime @default(now())
     updatedAt     DateTime @updatedAt
+
+    enrollments StudentCourse[]
 }
 
 model Course {
@@ -28,10 +30,35 @@ model Course {
     description    String
     ects           Int
     semester       Int // 1-6
-    year           Int // 1-3 (npr. 1-2 sem = 1. godina, 3-4 = 2. godina, 5-6 = 3. godina)
+    year           Int // 1-3
     prerequisite   Course?  @relation("CoursePrerequisite", fields: [prerequisiteId], references: [id])
     prerequisiteId Int?
     dependents     Course[] @relation("CoursePrerequisite")
     createdAt      DateTime @default(now())
     updatedAt      DateTime @updatedAt
+
+    enrollments StudentCourse[]
+}
+
+enum EnrollmentStatus {
+    PASSED
+    FAILED
+    ACTIVE
+}
+
+model StudentCourse {
+    id               Int              @id @default(autoincrement())
+    student          Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+    studentId        Int
+    course           Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+    courseId         Int
+    status           EnrollmentStatus
+    assignedYear     Int // akademska godina studenta kad je status dodan (1-3)
+    assignedSemester Int // semestar (1-6)
+    createdAt        DateTime         @default(now())
+    updatedAt        DateTime         @updatedAt
+
+    @@index([studentId])
+    @@index([courseId])
+    @@index([studentId, assignedSemester])
 }
