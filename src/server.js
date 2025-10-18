@@ -33,6 +33,42 @@ app.get('/students', async (req, res) => {
   }
 });
 
+// GET /courses - dohvat svih kolegija s preduvjetom (ako postoji)
+app.get('/courses', async (req, res) => {
+  try {
+    const courses = await prisma.course.findMany({
+      select: {
+        id: true,
+        name: true,
+        holder: true,
+        description: true,
+        ects: true,
+        semester: true,
+        year: true,
+        prerequisite: {
+          select: {
+            id: true,
+            name: true,
+            semester: true,
+            year: true,
+          },
+        },
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: [
+        { year: 'asc' },
+        { semester: 'asc' },
+        { name: 'asc' },
+      ],
+    });
+    res.json(courses);
+  } catch (err) {
+    console.error('Greška pri dohvatu kolegija:', err);
+    res.status(500).json({ error: 'Interna greška servera' });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server sluša na portu ${PORT}`);
