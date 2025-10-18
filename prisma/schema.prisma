@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = env("DATABASE_URL")
+  url      = "file:./dev.db"
 }
 
 model Student {
@@ -16,7 +16,7 @@ model Student {
   passwordHash  String
   enrolledYear  Int
   repeatingYear Boolean  @default(false)
-  module        String?  // postavlja se samo ako je enrolledYear = 3
+  module        String? // postavlja se samo ako je enrolledYear = 3
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
