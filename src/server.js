@@ -203,40 +203,143 @@ app.get('/students', async (req, res) => {
 });
 
 // GET /courses - dohvat svih kolegija s preduvjetom (ako postoji)
-app.get('/courses', async (req, res) => {
+app.get('/students/:id/courses', async (req, res) => {
+  const studentId = Number(req.params.id);
+  if (!Number.isInteger(studentId)) {
+    return res.status(400).json({ error: 'Neispravan studentId' });
+  }
+
+  // helperi
+  const isWinterSem = (sem) => [1, 3, 5].includes(sem);
+  const isSummerSem = (sem) => [2, 4, 6].includes(sem);
+  const ensureYearSimple = (y) => {
+    const yy = Number(y);
+    if (![1, 2, 3].includes(yy)) throw new Error('year mora biti 1, 2 ili 3');
+    return yy;
+  };
+
   try {
-    const courses = await prisma.course.findMany({
-      select: {
-        id: true,
-        name: true,
-        holder: true,
-        description: true,
-        ects: true,
-        semester: true,
-        year: true,
-        prerequisite: {
-          select: {
-            id: true,
-            name: true,
-            semester: true,
-            year: true,
+    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!student) return res.status(404).json({ error: 'Student nije pronađen' });
+
+    // Odredi ciljanu godinu:
+    // - ako je zadana u query parametru ?year=, koristi nju
+    // - inače koristi student.enrolledYear
+    let targetYear = student.enrolledYear;
+    if (req.query?.year !== undefined) {
+      try {
+        targetYear = ensureYearSimple(req.query.year);
+      } catch (e) {
+        return res.status(400).json({ error: e.message });
+      }
+    }
+
+    // Dohvati sve kolegije i sve upise studenta
+    const [courses, enrollments] = await Promise.all([
+      prisma.course.findMany({
+        select: {
+          id: true,
+          name: true,
+          ects: true,
+          semester: true,
+          year: true,
+          prerequisiteId: true,
+        },
+      }),
+      prisma.studentCourse.findMany({
+        where: { studentId },
+        include: {
+          course: {
+            select: { id: true, name: true, ects: true, semester: true, year: true, prerequisiteId: true },
           },
         },
-        createdAt: true,
-        updatedAt: true,
-      },
-      orderBy: [
-        { year: 'asc' },
-        { semester: 'asc' },
-        { name: 'asc' },
-      ],
+      }),
+    ]);
+
+    // Skupovi za brzu provjeru
+    const failedSet = new Set(
+      enrollments.filter(e => e.status === 'FAILED').map(e => e.courseId)
+    );
+    const enrolledCourseIds = new Set(
+      enrollments.map(e => e.courseId) // bilo PASSED/FAILED/ACTIVE
+    );
+
+    // FAILED podijeljeni na zimski/ljetni po semestru kolegija
+    const winterFailedMap = new Map(); // courseId -> course
+    const summerFailedMap = new Map();
+    for (const e of enrollments) {
+      if (e.status !== 'FAILED') continue;
+      const c = e.course;
+      if (isWinterSem(c.semester)) {
+        winterFailedMap.set(c.id, c);
+      } else if (isSummerSem(c.semester)) {
+        summerFailedMap.set(c.id, c);
+      }
+    }
+
+    const failedCourses = {
+      winter: Array.from(winterFailedMap.values()).map(c => ({
+        id: c.id,
+        name: c.name,
+        ects: c.ects,
+        semester: c.semester,
+        year: c.year,
+        prerequisiteId: c.prerequisiteId,
+      })),
+      summer: Array.from(summerFailedMap.values()).map(c => ({
+        id: c.id,
+        name: c.name,
+        ects: c.ects,
+        semester: c.semester,
+        year: c.year,
+        prerequisiteId: c.prerequisiteId,
+      })),
+    };
+
+    // Available:
+    // - svi kolegiji na ciljanoj godini
+    // - filter: bez preduvjeta ili preduvjet nije u failedSet
+    const targetYearCourses = courses.filter(c => c.year === targetYear);
+    const availableTargetYear = targetYearCourses.filter(c => {
+      return !c.prerequisiteId || !failedSet.has(c.prerequisiteId);
     });
-    res.json(courses);
+
+    // + kolegiji s 1. godine koje student uopće nema u upisima (nije PASSED/FAILED/ACTIVE)
+    const missingYear1 = targetYear >= 2
+      ? courses.filter(c => c.year === 1 && !enrolledCourseIds.has(c.id))
+      : [];
+
+    // Sastavi finalnu listu dostupnih (uniq po id)
+    const availableMap = new Map();
+    for (const c of availableTargetYear) availableMap.set(c.id, c);
+    for (const c of missingYear1) availableMap.set(c.id, c);
+
+    const availableCourses = {
+      year: targetYear,
+      courses: Array.from(availableMap.values())
+        .sort((a, b) => a.semester - b.semester || a.name.localeCompare(b.name))
+        .map(c => ({
+          id: c.id,
+          name: c.name,
+          ects: c.ects,
+          semester: c.semester,
+          year: c.year,
+          prerequisiteId: c.prerequisiteId,
+          prerequisiteBlocked: !!c.prerequisiteId && failedSet.has(c.prerequisiteId),
+        })),
+    };
+
+    res.json({
+      studentId,
+      targetYear,
+      failedCourses,
+      availableCourses,
+    });
   } catch (err) {
-    console.error('Greška pri dohvatu kolegija:', err);
+    console.error('Greška /students/:id/courses:', err);
     res.status(500).json({ error: 'Interna greška servera' });
   }
-});
+});;
 
 // GET /students/:id/courses - dohvat upisa studenta (ako već imaš ovaj endpoint u kodu, ostavi ga)
 app.get('/students/:id/courses', async (req, res) => {
