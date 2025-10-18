@@ -3,10 +3,23 @@ const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+const PDFDocument = require('pdfkit');
 
 const prisma = new PrismaClient();
 const app = express();
 app.use(express.json());
+
+const UPLOAD_ROOT = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(UPLOAD_ROOT)) fs.mkdirSync(UPLOAD_ROOT, { recursive: true });
+
+// Posluži uploadane datoteke (opcionalno)
+app.use('/uploads', express.static(UPLOAD_ROOT));
+
+// Dozvoljeni tipovi dokumenata
+const ALLOWED_DOC_TYPES = new Set(['upisniObrazac', 'uplatnica', 'potvrdaUplatnice']);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
@@ -668,6 +681,231 @@ app.patch('/students/:id', async (req, res) => {
     if (err?.message?.includes('enrolledYear')) {
       return res.status(400).json({ error: err.message });
     }
+    res.status(500).json({ error: 'Interna greška servera' });
+  }
+});
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const studentId = String(req.params.id || 'unknown');
+    const dir = path.join(UPLOAD_ROOT, studentId);
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const type = String(req.params.type);
+    const stamp = Date.now();
+    cb(null, `${type}-${stamp}.pdf`);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype !== 'application/pdf') {
+      return cb(new Error('Dozvoljeni su samo PDF dokumenti'));
+    }
+    cb(null, true);
+  },
+});
+
+// Helper: provjera studenta i tipa dokumenta
+async function ensureStudentAndType(req, res) {
+  const studentId = Number(req.params.id);
+  if (!Number.isInteger(studentId)) {
+    res.status(400).json({ error: 'Neispravan studentId' });
+    return null;
+  }
+  const type = String(req.params.type || '');
+  if (!ALLOWED_DOC_TYPES.has(type)) {
+    res.status(400).json({ error: 'Nepodržan tip dokumenta' });
+    return null;
+  }
+  const exists = await prisma.student.findUnique({ where: { id: studentId } });
+  if (!exists) {
+    res.status(404).json({ error: 'Student nije pronađen' });
+    return null;
+  }
+  return { studentId, type };
+}
+
+/* ============ 1) Download mock PDF-a ============ */
+// GET /documents/templates/:type  -> generira mock PDF i šalje kao attachment
+app.get('/documents/templates/:type', async (req, res) => {
+  const type = String(req.params.type || '');
+  if (!ALLOWED_DOC_TYPES.has(type)) {
+    return res.status(400).json({ error: 'Nepodržan tip dokumenta' });
+  }
+  try {
+    const filename =
+      type === 'uplatnica' ? 'uplatnica.pdf' : type === 'upisniObrazac' ? 'upisni_obrazac.pdf' : 'potvrda_uplatnice.pdf';
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    // Generiraj jednostavan PDF u letu
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    doc.pipe(res);
+    doc.fontSize(20).text(`Mock PDF: ${filename}`, { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Ovaj PDF je generiran kao zamjena za stvarni dokument.`, { align: 'center' });
+    doc.moveDown();
+    const now = new Date().toLocaleString('hr-HR');
+    doc.text(`Generirano: ${now}`, { align: 'center' });
+    doc.end();
+  } catch (err) {
+    console.error('Greška pri generiranju PDF-a:', err);
+    res.status(500).json({ error: 'Greška pri generiranju PDF-a' });
+  }
+});
+
+/* ============ 2) Upload PDF-a po studentu ============ */
+// POST /students/:id/documents/:type  (body: form-data s poljem "file")
+app.post('/students/:id/documents/:type', async (req, res, next) => {
+  try {
+    const ctx = await ensureStudentAndType(req, res);
+    if (!ctx) return;
+
+    // multer handler
+    upload.single('file')(req, res, async (err) => {
+      if (err) {
+        console.error('Upload error:', err);
+        const msg = err?.message || 'Greška pri uploadu';
+        return res.status(400).json({ error: msg });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: 'Nedostaje datoteka (file)' });
+      }
+
+      const { studentId, type } = ctx;
+      const { filename, path: filePath, mimetype, size } = req.file;
+
+      const record = await prisma.studentDocument.create({
+        data: {
+          studentId,
+          type,
+          filename,
+          path: filePath,
+          mime: mimetype,
+          size,
+          accepted: false,
+        },
+      });
+
+      res.status(201).json({
+        message: 'Dokument uspješno uploadan',
+        document: {
+          id: record.id,
+          type: record.type,
+          filename: record.filename,
+          size: record.size,
+          mime: record.mime,
+          accepted: record.accepted,
+          uploadedAt: record.uploadedAt,
+          // opcijski: URL do datoteke
+          url: `/uploads/${studentId}/${filename}`,
+        },
+      });
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ============ 3) Lista dokumenata po studentu ============ */
+// GET /students/:id/documents
+app.get('/students/:id/documents', async (req, res) => {
+  const studentId = Number(req.params.id);
+  if (!Number.isInteger(studentId)) {
+    return res.status(400).json({ error: 'Neispravan studentId' });
+  }
+  try {
+    const exists = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!exists) return res.status(404).json({ error: 'Student nije pronađen' });
+
+    const docs = await prisma.studentDocument.findMany({
+      where: { studentId },
+      orderBy: [{ uploadedAt: 'desc' }],
+    });
+
+    res.json({
+      studentId,
+      documents: docs.map(d => ({
+        id: d.id,
+        type: d.type,
+        filename: d.filename,
+        size: d.size,
+        mime: d.mime,
+        accepted: d.accepted,
+        uploadedAt: d.uploadedAt,
+        url: `/uploads/${studentId}/${d.filename}`,
+      })),
+    });
+  } catch (err) {
+    console.error('Greška pri dohvaćanju dokumenata:', err);
+    res.status(500).json({ error: 'Interna greška servera' });
+  }
+});
+
+/* ============ 4) Završi upis ============ */
+// POST /students/:id/enrollment/submit
+// Validira da postoje uploadani dokumenti za sve tipove i označi ih accepted=true (zadnje uploadane)
+app.post('/students/:id/enrollment/submit', async (req, res) => {
+  const studentId = Number(req.params.id);
+  if (!Number.isInteger(studentId)) {
+    return res.status(400).json({ error: 'Neispravan studentId' });
+  }
+  try {
+    const exists = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!exists) return res.status(404).json({ error: 'Student nije pronađen' });
+
+    const requiredTypes = ['upisniObrazac', 'uplatnica', 'potvrdaUplatnice'];
+
+    // Dohvati sve dokumente (zadnje po tipu)
+    const docs = await prisma.studentDocument.findMany({
+      where: { studentId, type: { in: requiredTypes } },
+      orderBy: [{ uploadedAt: 'desc' }],
+    });
+
+    const latestByType = new Map();
+    for (const d of docs) {
+      if (!latestByType.has(d.type)) latestByType.set(d.type, d);
+    }
+
+    const missing = requiredTypes.filter(t => !latestByType.has(t));
+    if (missing.length > 0) {
+      return res.status(400).json({
+        error: 'Nedostaju dokumenti',
+        missing, // koji tipovi fale
+      });
+    }
+
+    // Označi “zadnje” dokumente kao accepted=true
+    const toAcceptIds = Array.from(latestByType.values()).map(d => d.id);
+    await prisma.studentDocument.updateMany({
+      where: { id: { in: toAcceptIds } },
+      data: { accepted: true },
+    });
+
+    res.json({
+      studentId,
+      accepted: true,
+      acceptedDocuments: requiredTypes.map(t => {
+        const d = latestByType.get(t);
+        return {
+          id: d.id,
+          type: d.type,
+          filename: d.filename,
+          size: d.size,
+          mime: d.mime,
+          uploadedAt: d.uploadedAt,
+          url: `/uploads/${studentId}/${d.filename}`,
+        };
+      }),
+      message: 'Upis je potvrđen: dokumenti su zaprimljeni i prihvaćeni.',
+    });
+  } catch (err) {
+    console.error('Greška pri potvrdi upisa:', err);
     res.status(500).json({ error: 'Interna greška servera' });
   }
 });
