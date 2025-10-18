@@ -16,17 +16,16 @@ const yearSemesters = { 1: [1, 2], 2: [3, 4], 3: [5, 6] };
 const ODDS = [1, 3, 5];
 const EVENS = [2, 4, 6];
 
-function ensureYear(enrolledYear) {
-  const y = Number(enrolledYear);
-  if (![1, 2, 3].includes(y)) {
-    throw new Error('enrolledYear mora biti 1, 2 ili 3');
-  }
-  return y;
+function ensureYear(y) {
+  const n = Number(y);
+  if (![1, 2, 3].includes(n)) throw new Error('enrolledYear mora biti 1, 2 ili 3');
+  return n;
 }
 function ensureModule(enrolledYear, module) {
-  if (enrolledYear === 3) return module || null;
+  if (enrolledYear === 3) return module ?? null;
   return null;
 }
+
 
 async function getStudentStatusSets(studentId) {
   // Vrati skupove položenih i padnutih (po id-u), te sve upise
@@ -1235,6 +1234,182 @@ app.get('/students/leaderboard', async (req, res) => {
   } catch (err) {
     console.error('Greška /students/leaderboard:', err);
     res.status(500).json({ error: 'Interna greška servera' });
+  }
+});
+
+app.patch('/students/:id/enrollment/year', async (req, res) => {
+  const studentId = Number(req.params.id);
+  if (!Number.isInteger(studentId)) return res.status(400).json({ error: 'Neispravan studentId' });
+  try {
+    const s = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!s) return res.status(404).json({ error: 'Student nije pronađen' });
+
+    let { enrolledYear, repeatingYear, module } = req.body || {};
+    if (enrolledYear === undefined || repeatingYear === undefined) {
+      return res.status(400).json({ error: 'enrolledYear i repeatingYear su obavezni' });
+    }
+    const nextYear = ensureYear(enrolledYear);
+    const nextRepeat = Boolean(repeatingYear);
+    const nextModule = ensureModule(nextYear, module);
+
+    const updated = await prisma.student.update({
+      where: { id: studentId },
+      data: {
+        enrolledYear: nextYear,
+        repeatingYear: nextRepeat,
+        module: nextModule,
+        // korak 1 postavljen
+        enrollmentStep: 1,
+        enrollmentYearSelected: true,
+        // reset donjih koraka (u slučaju ponovnog odabira)
+        enrollmentCoursesSelected: false,
+        enrollmentDocumentsSubmitted: false,
+        enrollmentCompleted: false,
+        selectedWinterCourseIds: [],
+        selectedSummerCourseIds: [],
+      },
+      select: {
+        id: true, firstName: true, lastName: true, enrolledYear: true,
+        repeatingYear: true, module: true,
+        enrollmentStep: true, enrollmentYearSelected: true,
+        enrollmentCoursesSelected: true, enrollmentDocumentsSubmitted: true,
+        enrollmentCompleted: true, selectedWinterCourseIds: true, selectedSummerCourseIds: true,
+      },
+    });
+
+    res.json({ message: 'Korak 1 spremljen', student: updated });
+  } catch (err) {
+    console.error('PATCH /students/:id/enrollment/year', err);
+    res.status(400).json({ error: err?.message || 'Greška pri spremanju koraka 1' });
+  }
+});
+
+/* KORAK 2: Odabir predmeta
+   PATCH /students/:id/enrollment/courses
+   body: { winterCourseIds: number[], summerCourseIds: number[] }
+   Napomena: samo spremamo odabir na Studentu; ne kreiramo ACTIVE upise.
+*/
+app.patch('/students/:id/enrollment/courses', async (req, res) => {
+  const studentId = Number(req.params.id);
+  if (!Number.isInteger(studentId)) return res.status(400).json({ error: 'Neispravan studentId' });
+  try {
+    const s = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!s) return res.status(404).json({ error: 'Student nije pronađen' });
+    if (!s.enrollmentYearSelected) {
+      return res.status(400).json({ error: 'Prvo dovršite korak 1 (odabir godine)' });
+    }
+
+    let { winterCourseIds = [], summerCourseIds = [] } = req.body || {};
+    if (!Array.isArray(winterCourseIds) || !Array.isArray(summerCourseIds)) {
+      return res.status(400).json({ error: 'winterCourseIds i summerCourseIds moraju biti polja' });
+    }
+    // opcionalno: ograniči na max 6 po semestru
+    if (winterCourseIds.length > 6 || summerCourseIds.length > 6) {
+      return res.status(400).json({ error: 'Maksimalno 6 kolegija po semestru' });
+    }
+
+    const updated = await prisma.student.update({
+      where: { id: studentId },
+      data: {
+        selectedWinterCourseIds: winterCourseIds,
+        selectedSummerCourseIds: summerCourseIds,
+        enrollmentStep: 2,
+        enrollmentCoursesSelected: true,
+        // još uvijek nije završeno niti predano
+        enrollmentDocumentsSubmitted: false,
+        enrollmentCompleted: false,
+      },
+      select: {
+        id: true, firstName: true, lastName: true, enrolledYear: true, module: true,
+        enrollmentStep: true, enrollmentYearSelected: true, enrollmentCoursesSelected: true,
+        enrollmentDocumentsSubmitted: true, enrollmentCompleted: true,
+        selectedWinterCourseIds: true, selectedSummerCourseIds: true,
+      },
+    });
+
+    res.json({ message: 'Korak 2 spremljen', student: updated });
+  } catch (err) {
+    console.error('PATCH /students/:id/enrollment/courses', err);
+    res.status(400).json({ error: err?.message || 'Greška pri spremanju koraka 2' });
+  }
+});
+
+/* KORAK 3: Potvrda dokumenata (status)
+   PATCH /students/:id/enrollment/documents
+   body: { submitted: boolean }  // npr. { submitted: true } nakon što su PDF-ovi uploadani
+*/
+app.patch('/students/:id/enrollment/documents', async (req, res) => {
+  const studentId = Number(req.params.id);
+  if (!Number.isInteger(studentId)) return res.status(400).json({ error: 'Neispravan studentId' });
+  try {
+    const s = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!s) return res.status(404).json({ error: 'Student nije pronađen' });
+    if (!s.enrollmentCoursesSelected) {
+      return res.status(400).json({ error: 'Prvo dovršite korak 2 (odabir predmeta)' });
+    }
+
+    const { submitted } = req.body || {};
+    if (submitted !== true) {
+      return res.status(400).json({ error: 'Očekuje se submitted=true' });
+    }
+
+    const updated = await prisma.student.update({
+      where: { id: studentId },
+      data: {
+        enrollmentStep: 3,
+        enrollmentDocumentsSubmitted: true,
+        enrollmentCompleted: false, // završavamo tek na /complete
+      },
+      select: {
+        id: true, firstName: true, lastName: true,
+        enrollmentStep: true, enrollmentYearSelected: true, enrollmentCoursesSelected: true,
+        enrollmentDocumentsSubmitted: true, enrollmentCompleted: true,
+      },
+    });
+
+    res.json({ message: 'Korak 3 spremljen (dokumenti predani)', student: updated });
+  } catch (err) {
+    console.error('PATCH /students/:id/enrollment/documents', err);
+    res.status(400).json({ error: err?.message || 'Greška pri spremanju koraka 3' });
+  }
+});
+
+/* ZAVRŠETAK: Označi upis dovršenim
+   PATCH /students/:id/enrollment/complete
+   body: { complete: true }
+   Valja tek kad su koraci 1,2,3 završeni.
+*/
+app.patch('/students/:id/enrollment/complete', async (req, res) => {
+  const studentId = Number(req.params.id);
+  if (!Number.isInteger(studentId)) return res.status(400).json({ error: 'Neispravan studentId' });
+  try {
+    const s = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!s) return res.status(404).json({ error: 'Student nije pronađen' });
+
+    if (!(s.enrollmentYearSelected && s.enrollmentCoursesSelected && s.enrollmentDocumentsSubmitted)) {
+      return res.status(400).json({ error: 'Nisu završeni svi koraci (1, 2 i 3).' });
+    }
+
+    const { complete } = req.body || {};
+    if (complete !== true) {
+      return res.status(400).json({ error: 'Očekuje se complete=true' });
+    }
+
+    const updated = await prisma.student.update({
+      where: { id: studentId },
+      data: { enrollmentCompleted: true },
+      select: {
+        id: true, firstName: true, lastName: true, enrolledYear: true, module: true,
+        enrollmentStep: true, enrollmentYearSelected: true, enrollmentCoursesSelected: true,
+        enrollmentDocumentsSubmitted: true, enrollmentCompleted: true,
+        selectedWinterCourseIds: true, selectedSummerCourseIds: true,
+      },
+    });
+
+    res.json({ message: 'Upis dovršen', student: updated });
+  } catch (err) {
+    console.error('PATCH /students/:id/enrollment/complete', err);
+    res.status(400).json({ error: err?.message || 'Greška pri završetku upisa' });
   }
 });
 

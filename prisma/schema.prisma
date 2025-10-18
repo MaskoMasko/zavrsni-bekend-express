@@ -8,26 +8,31 @@ datasource db {
 }
 
 model Student {
-    id                           Int     @id @default(autoincrement())
-    jmbag                        String  @unique
-    firstName                    String
-    lastName                     String
-    email                        String  @unique
-    passwordHash                 String
-    enrolledYear                 Int
-    repeatingYear                Boolean @default(false)
-    module                       String?
-    // Flags za lifecycle upisa
+    id            Int     @id @default(autoincrement())
+    jmbag         String  @unique
+    firstName     String
+    lastName      String
+    email         String  @unique
+    passwordHash  String
+    enrolledYear  Int
+    repeatingYear Boolean @default(false)
+    module        String?
+
+    // Praćenje koraka upisa
+    enrollmentStep               Int     @default(0) // 0=ništa, 1=godina, 2=predmeti, 3=dokumenti
     enrollmentYearSelected       Boolean @default(false)
     enrollmentCoursesSelected    Boolean @default(false)
     enrollmentDocumentsSubmitted Boolean @default(false)
     enrollmentCompleted          Boolean @default(false)
 
+    selectedWinterCourseIds Json @default("[]") // number[]
+    selectedSummerCourseIds Json @default("[]") // number[]
+
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
-    enrollments     StudentCourse[]
-    StudentDocument StudentDocument[]
+    enrollments StudentCourse[]
+    documents   StudentDocument[]
 }
 
 model Course {
