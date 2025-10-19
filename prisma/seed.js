@@ -236,64 +236,63 @@ async function main() {
   const isStep2 = new Set(step2List);
   const isStep1 = new Set(step1List);
 
-  const allEnrollments = [];
+    const allEnrollments = [];
 
-  for (const student of students) {
-    const passedSet = new Set();
-    const failedBySem = {};
-    const activeSet = new Set();
+    for (const student of students) {
+        const passedSet = new Set();
+        const failedBySem = {};
+        const activeSet = new Set();
 
-    // 1) Povijest za sve prethodne godine (PASSED/FAILED)
-    for (let y = 1; y < student.enrolledYear; y++) {
-      collectYearHistory(student, y, allEnrollments, passedSet, failedBySem);
+        // PASSED/FAILED povijest
+        for (let y = 1; y < student.enrolledYear; y++) {
+            collectYearHistory(student, y, allEnrollments, passedSet, failedBySem);
+        }
+        if (student.repeatingYear) {
+            collectYearHistory(student, student.enrolledYear, allEnrollments, passedSet, failedBySem);
+        }
+
+        // ACTIVE samo za completed ili step2
+        if (isCompleted.has(student.id) || isStep2.has(student.id)) {
+            const [currentOdd, currentEven] = yearSemesters[student.enrolledYear];
+            const priorOdds = [1, 3, 5].filter(s => s < currentOdd);
+            const priorEvens = [2, 4, 6].filter(s => s < currentEven);
+
+            const retakeOdd = [
+                ...(priorOdds.flatMap(s => failedBySem[s] || [])),
+                ...(student.repeatingYear ? (failedBySem[currentOdd] || []) : []),
+            ];
+            const retakeEven = [
+                ...(priorEvens.flatMap(s => failedBySem[s] || [])),
+                ...(student.repeatingYear ? (failedBySem[currentEven] || []) : []),
+            ];
+            const newOdd = (coursesBySem[currentOdd] || []);
+            const newEven = (coursesBySem[currentEven] || []);
+
+            fillSemesterActive({
+                enrollments: allEnrollments,
+                student,
+                semester: currentOdd,
+                retakeCandidates: retakeOdd,
+                newCandidates: newOdd,
+                passedSet,
+                activeSet,
+            });
+            fillSemesterActive({
+                enrollments: allEnrollments,
+                student,
+                semester: currentEven,
+                retakeCandidates: retakeEven,
+                newCandidates: newEven,
+                passedSet,
+                activeSet,
+            });
+        }
     }
-    // 2) Ako ponavlja, dodaj povijest i iste godine
-    if (student.repeatingYear) {
-      collectYearHistory(student, student.enrolledYear, allEnrollments, passedSet, failedBySem);
+
+// Upis svih upisa u bazu
+    if (allEnrollments.length) {
+        await prisma.studentCourse.createMany({ data: allEnrollments });
     }
-
-    // 3) Aktivni predmeti samo za step2 i completed
-    if (isCompleted.has(student.id) || isStep2.has(student.id)) {
-      const [currentOdd, currentEven] = yearSemesters[student.enrolledYear];
-      const priorOdds = [1, 3, 5].filter(s => s < currentOdd);
-      const priorEvens = [2, 4, 6].filter(s => s < currentEven);
-
-      const retakeOdd = [
-        ...(priorOdds.flatMap(s => failedBySem[s] || [])),
-        ...(student.repeatingYear ? (failedBySem[currentOdd] || []) : []),
-      ];
-      const retakeEven = [
-        ...(priorEvens.flatMap(s => failedBySem[s] || [])),
-        ...(student.repeatingYear ? (failedBySem[currentEven] || []) : []),
-      ];
-      const newOdd = (coursesBySem[currentOdd] || []);
-      const newEven = (coursesBySem[currentEven] || []);
-
-      fillSemesterActive({
-        enrollments: allEnrollments,
-        student,
-        semester: currentOdd,
-        retakeCandidates: retakeOdd,
-        newCandidates: newOdd,
-        passedSet,
-        activeSet,
-      });
-      fillSemesterActive({
-        enrollments: allEnrollments,
-        student,
-        semester: currentEven,
-        retakeCandidates: retakeEven,
-        newCandidates: newEven,
-        passedSet,
-        activeSet,
-      });
-    }
-  }
-
-  // upiši sve upise
-  if (allEnrollments.length) {
-    await prisma.studentCourse.createMany({ data: allEnrollments });
-  }
 
   // postavi statuse na Student
   for (const student of students) {
@@ -333,6 +332,7 @@ async function main() {
     } else {
       // ostaju na koraku 0 (već postavljeno pri kreiranju)
     }
+
   }
 
   console.log('Seed završen: 36 kolegija + 100 studenata (90 completed, 5 step2, 5 step1) + upisani upisi (PASSED/FAILED/ACTIVE).');

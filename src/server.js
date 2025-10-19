@@ -117,7 +117,7 @@ app.get('/students/leaderboard', async (req, res) => {
         const students = await prisma.student.findMany({
             where: {
                 enrolledYear: yearParam,
-                // enrollmentCompleted: true, // ne diramo staru logiku; ovo je bilo zakomentirano i ostaje tako
+                enrollmentCompleted: true,
             },
             select: {
                 id: true, jmbag: true, firstName: true, lastName: true, email: true,
@@ -540,25 +540,6 @@ async function getActiveCoursesPayload(studentId) {
   };
 }
 
-// --- (opcionalno) dorada postojećeg JSON endpointa da koristi helper ---
-app.get('/students/:id(\\d+)/enrollment/active-courses', async (req, res) => {
-  const studentId = Number(req.params.id);
-  if (!Number.isInteger(studentId)) {
-    return res.status(400).json({ error: 'Neispravan studentId' });
-  }
-  try {
-    const payload = await getActiveCoursesPayload(studentId);
-    if (payload.error) return res.status(404).json({ error: payload.error });
-    res.json({
-      currentYearSemesters: payload.currentYearSemesters,
-      active: payload.active,
-    });
-  } catch (err) {
-    console.error('GET /students/:id/enrollment/active-courses error:', err);
-    res.status(500).json({ error: 'Interna greška servera' });
-  }
-});
-
 // --- download: PDF ili CSV ---
 function sendActiveCoursesPdf(res, payload) {
   const { student, currentYearSemesters, active } = payload;
@@ -720,7 +701,7 @@ app.post('/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Email mora biti u domeni @student.edu.hr' });
     }
 
-    const student = await prisma.student.findUnique({ where: { email: normEmail }, select: {enrollmentCompleted: true, enrollmentCoursesSelected: true, enrollmentYearSelected: true, enrollmentDocumentsSubmitted: true, enrollmentStep: true, repeatingYear: true, enrolledYear: true, email: true, module: true, lastName
+    const student = await prisma.student.findUnique({ where: { email: normEmail }, select: {id: true, enrollmentCompleted: true, enrollmentCoursesSelected: true, enrollmentYearSelected: true, enrollmentDocumentsSubmitted: true, enrollmentStep: true, repeatingYear: true, enrolledYear: true, email: true, module: true, lastName
     : true, jmbag: true, firstName: true, documents: true, passwordHash: true} });
     if (!student) {
       return res.status(401).json({ error: 'Neispravan email ili lozinka' });
@@ -1027,7 +1008,88 @@ app.get('/students/:id/documents', async (req, res) => {
   }
 });
 
-// PATCH /students/:id/enrollment/courses (korak 2) - sada prima IMENA kolegija
+async function getActiveCoursesPayload(studentId) {
+    const yearSemesters = { 1: [1, 2], 2: [3, 4], 3: [5, 6] };
+
+    const student = await prisma.student.findUnique({
+        where: { id: Number(studentId) },
+        select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            enrolledYear: true,
+            module: true,
+            enrollmentStep: true,
+            enrollmentYearSelected: true,
+            enrollmentCoursesSelected: true,
+            enrollmentDocumentsSubmitted: true,
+            enrollmentCompleted: true,
+            updatedAt: true,
+        },
+    });
+    if (!student) return { error: 'Student nije pronađen' };
+
+    const [semOdd, semEven] = yearSemesters[student.enrolledYear];
+
+    const activeEnrollments = await prisma.studentCourse.findMany({
+        where: {
+            studentId: Number(studentId),
+            status: 'ACTIVE',
+            assignedSemester: { in: [semOdd, semEven] },
+        },
+        include: {
+            course: {
+                select: {
+                    id: true,
+                    name: true,
+                    ects: true,
+                    semester: true,
+                    year: true,
+                    prerequisiteId: true,
+                },
+            },
+        },
+        orderBy: [{ assignedSemester: 'asc' }, { id: 'asc' }],
+    });
+
+    const winter = [];
+    const summer = [];
+    for (const e of activeEnrollments) {
+        const item = {
+            enrollmentId: e.id,
+            courseId: e.course.id,
+            name: e.course.name,
+            ects: e.course.ects,
+            originalSemester: e.course.semester,
+            originalYear: e.course.year,
+            assignedSemester: e.assignedSemester,
+            assignedYear: e.assignedYear,
+            prerequisiteId: e.course.prerequisiteId,
+        };
+        if (e.assignedSemester === semOdd) winter.push(item);
+        else if (e.assignedSemester === semEven) summer.push(item);
+    }
+
+    const sumEcts = (arr) => arr.reduce((acc, c) => acc + (c.ects || 0), 0);
+
+    return {
+        student,
+        currentYearSemesters: { odd: semOdd, even: semEven },
+        active: {
+            winter: {
+                count: winter.length,
+                ects: sumEcts(winter),
+                courses: winter,
+            },
+            summer: {
+                count: summer.length,
+                ects: sumEcts(summer),
+                courses: summer,
+            },
+        },
+    };
+}
 app.patch('/students/:id/enrollment/courses', async (req, res) => {
     const studentId = Number(req.params.id);
     if (!Number.isInteger(studentId)) {
@@ -1042,60 +1104,42 @@ app.patch('/students/:id/enrollment/courses', async (req, res) => {
         }
 
         let { winterCourseNames = [], summerCourseNames = [] } = req.body || {};
-
         if (!Array.isArray(winterCourseNames) || !Array.isArray(summerCourseNames)) {
             return res.status(400).json({ error: 'winterCourseNames i summerCourseNames moraju biti polja stringova' });
         }
 
-        // Očisti whitespace i ignoriraj prazne stringove
         winterCourseNames = winterCourseNames.map(n => String(n).trim()).filter(Boolean);
         summerCourseNames = summerCourseNames.map(n => String(n).trim()).filter(Boolean);
 
-        // Max 6 po semestru
         if (winterCourseNames.length > 6 || summerCourseNames.length > 6) {
             return res.status(400).json({ error: 'Maksimalno 6 kolegija po semestru' });
         }
 
-        // Nema duplikata među svim odabirima (case-insensitive)
-        const allNames = [...winterCourseNames, ...summerCourseNames];
         const norm = (s) => s.toLowerCase();
-        const uniqCount = new Set(allNames.map(norm)).size;
-        if (uniqCount !== allNames.length) {
+        const allNames = [...winterCourseNames, ...summerCourseNames];
+        if (new Set(allNames.map(norm)).size !== allNames.length) {
             return res.status(400).json({ error: 'Duplikati u odabranim kolegijima nisu dopušteni' });
         }
 
         const [semOdd, semEven] = ({ 1: [1, 2], 2: [3, 4], 3: [5, 6] })[student.enrolledYear];
-
-        // Učitaj kolegije i status studenta
         const courses = await prisma.course.findMany();
         const byNameLower = Object.fromEntries(courses.map(c => [c.name.toLowerCase(), c]));
-        const { passedSet, failedSet } = await (async () => {
-            const enrollments = await prisma.studentCourse.findMany({
-                where: { studentId },
-                select: { status: true, courseId: true },
-            });
-            return {
-                passedSet: new Set(enrollments.filter(e => e.status === 'PASSED').map(e => e.courseId)),
-                failedSet: new Set(enrollments.filter(e => e.status === 'FAILED').map(e => e.courseId)),
-            };
-        })();
 
-        // Mapiraj imena -> Course (case-insensitive) i validiraj
+        const enrollments = await prisma.studentCourse.findMany({
+            where: { studentId },
+            select: { status: true, courseId: true },
+        });
+        const passedSet = new Set(enrollments.filter(e => e.status === 'PASSED').map(e => e.courseId));
+        const failedSet = new Set(enrollments.filter(e => e.status === 'FAILED').map(e => e.courseId));
+
         const resolveCourses = (names) => {
             const resolved = [];
             const unknown = [];
             const errors = [];
             for (const name of names) {
                 const c = byNameLower[norm(name)];
-                if (!c) {
-                    unknown.push(name);
-                    continue;
-                }
-                if (passedSet.has(c.id)) {
-                    errors.push(`Kolegij "${c.name}" je već položen`);
-                    continue;
-                }
-                // dostupnost: bez preduvjeta ili preduvjet NIJE u failed setu
+                if (!c) { unknown.push(name); continue; }
+                if (passedSet.has(c.id)) { errors.push(`Kolegij "${c.name}" je već položen`); continue; }
                 if (c.prerequisiteId && failedSet.has(c.prerequisiteId)) {
                     errors.push(`Kolegij "${c.name}" nije dostupan (preduvjet u nepoloženim)`);
                     continue;
@@ -1109,23 +1153,17 @@ app.patch('/students/:id/enrollment/courses', async (req, res) => {
         const summerRes = resolveCourses(summerCourseNames);
 
         if (winterRes.unknown.length || summerRes.unknown.length) {
-            return res.status(400).json({
-                error: 'Neki kolegiji nisu pronađeni po imenu',
-                unknown: [...winterRes.unknown, ...summerRes.unknown],
-            });
+            return res.status(400).json({ error: 'Neki kolegiji nisu pronađeni po imenu', unknown: [...winterRes.unknown, ...summerRes.unknown] });
         }
         if (winterRes.errors.length || summerRes.errors.length) {
-            return res.status(400).json({
-                error: 'Neispravni odabiri kolegija',
-                details: [...winterRes.errors, ...summerRes.errors],
-            });
+            return res.status(400).json({ error: 'Neispravni odabiri kolegija', details: [...winterRes.errors, ...summerRes.errors] });
         }
 
         const winterCourses = winterRes.resolved;
         const summerCourses = summerRes.resolved;
 
-        // Transakcija: obriši stare ACTIVE iz semOdd/semEven i upiši nove ACTIVE
-        const result = await prisma.$transaction(async (tx) => {
+        // Zapiši ACTIVE u StudentCourse (odd/even semestri tekuće godine)
+        await prisma.$transaction(async (tx) => {
             await tx.studentCourse.deleteMany({
                 where: {
                     studentId,
@@ -1139,21 +1177,20 @@ app.patch('/students/:id/enrollment/courses', async (req, res) => {
                 courseId: c.id,
                 status: 'ACTIVE',
                 assignedYear: student.enrolledYear,
-                assignedSemester: semOdd, // zimski izbori idu u current odd semestar
+                assignedSemester: semOdd,
             }));
             const summerData = summerCourses.map(c => ({
                 studentId,
                 courseId: c.id,
                 status: 'ACTIVE',
                 assignedYear: student.enrolledYear,
-                assignedSemester: semEven, // ljetni izbori idu u current even semestar
+                assignedSemester: semEven,
             }));
 
             if (winterData.length) await tx.studentCourse.createMany({ data: winterData });
             if (summerData.length) await tx.studentCourse.createMany({ data: summerData });
 
-            // Spremi odabrane ID-jeve (i označi korak 2)
-            const updated = await tx.student.update({
+            await tx.student.update({
                 where: { id: studentId },
                 data: {
                     enrollmentStep: 2,
@@ -1161,28 +1198,39 @@ app.patch('/students/:id/enrollment/courses', async (req, res) => {
                     enrollmentDocumentsSubmitted: false,
                     enrollmentCompleted: false,
                 },
-                select: {
-                    id: true, firstName: true, lastName: true, enrolledYear: true,
-                    enrollmentStep: true, enrollmentYearSelected: true, enrollmentCoursesSelected: true,
-                    enrollmentDocumentsSubmitted: true, enrollmentCompleted: true,
-                },
             });
-
-            return {
-                message: 'Korak 2 spremljen (odabrani kolegiji)',
-                student: updated,
-                activeAssigned: {
-                    winter: winterCourses.map(c => ({ id: c.id, name: c.name, ects: c.ects })),
-                    summer: summerCourses.map(c => ({ id: c.id, name: c.name, ects: c.ects })),
-                },
-            };
         });
 
-        res.json(result);
+        // Vrati payload kao i GET /students/:id/enrollment/active-courses
+        const payload = await getActiveCoursesPayload(studentId);
+        if (payload.error) return res.status(500).json({ error: 'Greška pri dohvaćanju aktivnih predmeta nakon spremanja' });
+
+        return res.json({
+            message: 'Korak 2 spremljen (odabrani kolegiji)',
+            currentYearSemesters: payload.currentYearSemesters,
+            active: payload.active,
+        });
     } catch (err) {
         console.error('PATCH /students/:id/enrollment/courses error:', err);
         const msg = err?.message || 'Interna greška servera';
         res.status(400).json({ error: msg });
+    }
+});
+app.get('/students/:id(\\d+)/enrollment/active-courses', async (req, res) => {
+    const studentId = Number(req.params.id);
+    if (!Number.isInteger(studentId)) {
+        return res.status(400).json({ error: 'Neispravan studentId' });
+    }
+    try {
+        const payload = await getActiveCoursesPayload(studentId);
+        if (payload.error) return res.status(404).json({ error: payload.error });
+        res.json({
+            currentYearSemesters: payload.currentYearSemesters,
+            active: payload.active,
+        });
+    } catch (err) {
+        console.error('GET /students/:id/enrollment/active-courses error:', err);
+        res.status(500).json({ error: 'Interna greška servera' });
     }
 });
 
