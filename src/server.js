@@ -720,7 +720,8 @@ app.post('/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Email mora biti u domeni @student.edu.hr' });
     }
 
-    const student = await prisma.student.findUnique({ where: { email: normEmail } });
+    const student = await prisma.student.findUnique({ where: { email: normEmail }, select: {enrollmentCompleted: true, enrollmentCoursesSelected: true, enrollmentYearSelected: true, enrollmentDocumentsSubmitted: true, enrollmentStep: true, repeatingYear: true, enrolledYear: true, email: true, module: true, lastName
+    : true, jmbag: true, firstName: true, documents: true, passwordHash: true} });
     if (!student) {
       return res.status(401).json({ error: 'Neispravan email ili lozinka' });
     }
@@ -731,21 +732,8 @@ app.post('/auth/login', async (req, res) => {
     }
 
     const token = issueJwt(student);
-    // sanitiziraj user objekt
-    const user = {
-      id: student.id,
-      jmbag: student.jmbag,
-      firstName: student.firstName,
-      lastName: student.lastName,
-      email: student.email,
-      enrolledYear: student.enrolledYear,
-      repeatingYear: student.repeatingYear,
-      module: student.module,
-      createdAt: student.createdAt,
-      updatedAt: student.updatedAt,
-    };
 
-    res.json({ user, token });
+    res.json({ user: student, token });
   } catch (err) {
     console.error('Greška pri prijavi:', err);
     res.status(500).json({ error: 'Interna greška servera' });
@@ -767,7 +755,7 @@ app.get('/students/:id', async (req, res) => {
         lastName: true,
         email: true,
         enrolledYear: true,
-        repeatingYear: true,
+        repeatingYear: true, enrollmentCoursesSelected: true, enrollmentStep: true, enrollmentYearSelected: true, enrollmentCompleted: true, enrollmentDocumentsSubmitted: true,
         module: true,
         createdAt: true,
         updatedAt: true,
