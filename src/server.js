@@ -560,8 +560,6 @@ app.get('/students/:id(\\d+)/enrollment/active-courses', async (req, res) => {
 });
 
 // --- download: PDF ili CSV ---
-const PDFDocument = require('pdfkit');
-
 function sendActiveCoursesPdf(res, payload) {
   const { student, currentYearSemesters, active } = payload;
 
