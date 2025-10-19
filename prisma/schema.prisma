@@ -1,85 +1,82 @@
 generator client {
-    provider = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-    provider = "sqlite"
-    url      = "file:./dev.db"
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 model Student {
-    id            Int     @id @default(autoincrement())
-    jmbag         String  @unique
-    firstName     String
-    lastName      String
-    email         String  @unique
-    passwordHash  String
-    enrolledYear  Int
-    repeatingYear Boolean @default(false)
-    module        String?
+  id            Int     @id @default(autoincrement())
+  jmbag         String  @unique
+  firstName     String
+  lastName      String
+  email         String  @unique
+  passwordHash  String
+  enrolledYear  Int
+  repeatingYear Boolean @default(false)
+  module        String?
 
-    // Praćenje koraka upisa
-    enrollmentStep               Int     @default(0) // 0=ništa, 1=godina, 2=predmeti, 3=dokumenti
-    enrollmentYearSelected       Boolean @default(false)
-    enrollmentCoursesSelected    Boolean @default(false)
-    enrollmentDocumentsSubmitted Boolean @default(false)
-    enrollmentCompleted          Boolean @default(false)
+  // Praćenje koraka upisa
+  enrollmentStep               Int     @default(0) // 0=ništa, 1=godina, 2=predmeti, 3=dokumenti
+  enrollmentYearSelected       Boolean @default(false)
+  enrollmentCoursesSelected    Boolean @default(false)
+  enrollmentDocumentsSubmitted Boolean @default(false)
+  enrollmentCompleted          Boolean @default(false)
 
-    selectedWinterCourseIds Json @default("[]") // number[]
-    selectedSummerCourseIds Json @default("[]") // number[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-
-    enrollments StudentCourse[]
-    documents   StudentDocument[]
+  enrollments StudentCourse[]
+  documents   StudentDocument[]
 }
 
 model Course {
-    id             Int      @id @default(autoincrement())
-    name           String   @unique
-    holder         String
-    description    String
-    ects           Int
-    semester       Int
-    year           Int
-    prerequisite   Course?  @relation("CoursePrerequisite", fields: [prerequisiteId], references: [id])
-    prerequisiteId Int?
-    dependents     Course[] @relation("CoursePrerequisite")
-    createdAt      DateTime @default(now())
-    updatedAt      DateTime @updatedAt
+  id             Int      @id @default(autoincrement())
+  name           String   @unique
+  holder         String
+  description    String
+  ects           Int
+  semester       Int
+  year           Int
+  prerequisite   Course?  @relation("CoursePrerequisite", fields: [prerequisiteId], references: [id])
+  prerequisiteId Int?
+  dependents     Course[] @relation("CoursePrerequisite")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-    enrollments StudentCourse[]
+  enrollments StudentCourse[]
 }
 
 model StudentCourse {
-    id               Int      @id @default(autoincrement())
-    student          Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-    studentId        Int
-    course           Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-    courseId         Int
-    status           String // 'PASSED' | 'FAILED' | 'ACTIVE'
-    assignedYear     Int
-    assignedSemester Int
-    createdAt        DateTime @default(now())
-    updatedAt        DateTime @updatedAt
+  id               Int      @id @default(autoincrement())
+  student          Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId        Int
+  course           Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId         Int
+  status           String // 'PASSED' | 'FAILED' | 'ACTIVE'
+  assignedYear     Int
+  assignedSemester Int
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-    @@index([studentId])
-    @@index([courseId])
-    @@index([studentId, assignedSemester])
+  @@index([studentId])
+  @@index([courseId])
+  @@index([studentId, assignedSemester])
 }
 
 model StudentDocument {
-    id         Int      @id @default(autoincrement())
-    student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-    studentId  Int
-    type       String // 'upisniObrazac' | 'uplatnica' | 'potvrdaUplatnice'
-    filename   String
-    path       String
-    mime       String
-    size       Int
-    accepted   Boolean  @default(false)
-    uploadedAt DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId  Int
+  type       String // 'upisniObrazac' | 'uplatnica' | 'potvrdaUplatnice'
+  filename   String
+  path       String
+  mime       String
+  size       Int
+  accepted   Boolean  @default(false)
+  uploadedAt DateTime @default(now())
 
-    @@index([studentId, type])
+  @@index([studentId, type])
 }
