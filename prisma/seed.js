@@ -193,6 +193,8 @@ async function main() {
   const FIRST_NAMES = ['Ana','Marko','Iva','Luka','Petra','Ivan','Mia','Filip','Ema','Sara','Josip','Karlo','Nina','Dora','Laura','Tin','Lea','Vito','Matea','Paula'];
   const LAST_NAMES = ['Anić','Markić','Ivić','Lukić','Petrić','Mijić','Filić','Emić','Sarić','Pavić','Babić','Perić','Kovač','Horvat','Novak','Klarić','Grgić','Marin','Jurić'];
   const MODULES = ['MMS', 'RPP', 'BIZ'];
+  const moduleCapacity = { MMS: 10, RPP: 10, BIZ: 10 };
+  const moduleCounts = { MMS: 0, RPP: 0, BIZ: 0 };
 
   const students = [];
   for (let i = 0; i < 100; i++) {
@@ -200,7 +202,20 @@ async function main() {
     const lastName = LAST_NAMES[(i * 3) % LAST_NAMES.length];
     const enrolledYear = ensureYear(1 + (i % 3)); // 1..3
     const repeatingYear = Math.random() < 0.2;    // ~20% ponavljača
-    const module = enrolledYear === 3 ? MODULES[i % MODULES.length] : null;
+    let module = null;
+
+    if (enrolledYear === 3) {
+      // Round-robin po modulima uz kapacitet max 10
+      for (let attempt = 0; attempt < MODULES.length; attempt++) {
+        const mod = MODULES[(i + attempt) % MODULES.length];
+        if (moduleCounts[mod] < moduleCapacity[mod]) {
+          module = mod;
+          moduleCounts[mod] += 1;
+          break;
+        }
+      }
+      // Ako su svi moduli puni (30/30), module ostaje null
+    }
 
     const email = generateStudentEmail(firstName, lastName, i + 1);
     if (!isStudentEmail(email)) throw new Error(`Email nije u dopuštenoj domeni: ${email}`);
@@ -236,63 +251,63 @@ async function main() {
   const isStep2 = new Set(step2List);
   const isStep1 = new Set(step1List);
 
-    const allEnrollments = [];
+  const allEnrollments = [];
 
-    for (const student of students) {
-        const passedSet = new Set();
-        const failedBySem = {};
-        const activeSet = new Set();
+  for (const student of students) {
+    const passedSet = new Set();
+    const failedBySem = {};
+    const activeSet = new Set();
 
-        // PASSED/FAILED povijest
-        for (let y = 1; y < student.enrolledYear; y++) {
-            collectYearHistory(student, y, allEnrollments, passedSet, failedBySem);
-        }
-        if (student.repeatingYear) {
-            collectYearHistory(student, student.enrolledYear, allEnrollments, passedSet, failedBySem);
-        }
-
-        // ACTIVE samo za completed ili step2
-        if (isCompleted.has(student.id) || isStep2.has(student.id)) {
-            const [currentOdd, currentEven] = yearSemesters[student.enrolledYear];
-            const priorOdds = [1, 3, 5].filter(s => s < currentOdd);
-            const priorEvens = [2, 4, 6].filter(s => s < currentEven);
-
-            const retakeOdd = [
-                ...(priorOdds.flatMap(s => failedBySem[s] || [])),
-                ...(student.repeatingYear ? (failedBySem[currentOdd] || []) : []),
-            ];
-            const retakeEven = [
-                ...(priorEvens.flatMap(s => failedBySem[s] || [])),
-                ...(student.repeatingYear ? (failedBySem[currentEven] || []) : []),
-            ];
-            const newOdd = (coursesBySem[currentOdd] || []);
-            const newEven = (coursesBySem[currentEven] || []);
-
-            fillSemesterActive({
-                enrollments: allEnrollments,
-                student,
-                semester: currentOdd,
-                retakeCandidates: retakeOdd,
-                newCandidates: newOdd,
-                passedSet,
-                activeSet,
-            });
-            fillSemesterActive({
-                enrollments: allEnrollments,
-                student,
-                semester: currentEven,
-                retakeCandidates: retakeEven,
-                newCandidates: newEven,
-                passedSet,
-                activeSet,
-            });
-        }
+    // PASSED/FAILED povijest za prethodne godine
+    for (let y = 1; y < student.enrolledYear; y++) {
+      collectYearHistory(student, y, allEnrollments, passedSet, failedBySem);
+    }
+    if (student.repeatingYear) {
+      collectYearHistory(student, student.enrolledYear, allEnrollments, passedSet, failedBySem);
     }
 
-// Upis svih upisa u bazu
-    if (allEnrollments.length) {
-        await prisma.studentCourse.createMany({ data: allEnrollments });
+    // ACTIVE samo za completed ili step2
+    if (isCompleted.has(student.id) || isStep2.has(student.id)) {
+      const [currentOdd, currentEven] = yearSemesters[student.enrolledYear];
+      const priorOdds = [1, 3, 5].filter(s => s < currentOdd);
+      const priorEvens = [2, 4, 6].filter(s => s < currentEven);
+
+      const retakeOdd = [
+        ...(priorOdds.flatMap(s => failedBySem[s] || [])),
+        ...(student.repeatingYear ? (failedBySem[currentOdd] || []) : []),
+      ];
+      const retakeEven = [
+        ...(priorEvens.flatMap(s => failedBySem[s] || [])),
+        ...(student.repeatingYear ? (failedBySem[currentEven] || []) : []),
+      ];
+      const newOdd = (coursesBySem[currentOdd] || []);
+      const newEven = (coursesBySem[currentEven] || []);
+
+      fillSemesterActive({
+        enrollments: allEnrollments,
+        student,
+        semester: currentOdd,
+        retakeCandidates: retakeOdd,
+        newCandidates: newOdd,
+        passedSet,
+        activeSet,
+      });
+      fillSemesterActive({
+        enrollments: allEnrollments,
+        student,
+        semester: currentEven,
+        retakeCandidates: retakeEven,
+        newCandidates: newEven,
+        passedSet,
+        activeSet,
+      });
     }
+  }
+
+  // Upis svih upisa u bazu
+  if (allEnrollments.length) {
+    await prisma.studentCourse.createMany({ data: allEnrollments });
+  }
 
   // postavi statuse na Student
   for (const student of students) {
@@ -332,10 +347,40 @@ async function main() {
     } else {
       // ostaju na koraku 0 (već postavljeno pri kreiranju)
     }
-
   }
 
-  console.log('Seed završen: 36 kolegija + 100 studenata (90 completed, 5 step2, 5 step1) + upisani upisi (PASSED/FAILED/ACTIVE).');
+  // LOG ZA TESTIRANJE: jedan completed i jedan step0
+  const completedStudentId = completedList[0];
+  const step0Ids = students
+    .filter(s => !isCompleted.has(s.id) && !isStep2.has(s.id) && !isStep1.has(s.id))
+    .map(s => s.id);
+  const step0StudentId = step0Ids[0];
+
+  const completedStudent = students.find(s => s.id === completedStudentId);
+  const step0Student = students.find(s => s.id === step0StudentId);
+
+  console.log('Seed završen: 36 kolegija + 100 studenata (90 completed, 5 step2, 5 step1) + upisi (PASSED/FAILED/ACTIVE).');
+  console.log('Kapacitet modula (max 10 po modulu):', { ...moduleCounts });
+  if (completedStudent) {
+    console.log('TEST LOGIN (COMPLETED):', {
+      id: completedStudent.id,
+      email: completedStudent.email,
+      password: plainPassword,
+      enrolledYear: completedStudent.enrolledYear,
+      module: completedStudent.module,
+      status: 'completed',
+    });
+  }
+  if (step0Student) {
+    console.log('TEST LOGIN (STEP 0 — no steps):', {
+      id: step0Student.id,
+      email: step0Student.email,
+      password: plainPassword,
+      enrolledYear: step0Student.enrolledYear,
+      module: step0Student.module,
+      status: 'step0',
+    });
+  }
 }
 
 main()

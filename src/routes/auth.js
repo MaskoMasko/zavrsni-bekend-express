@@ -6,7 +6,7 @@ const { generateUniqueStudentEmail, generateUniqueJmbag, issueJwt } = require('.
 const router = express.Router();
 
 // POST /auth/register
-router.post('/auth/register', async (req, res) => {
+app.post('/auth/register', async (req, res) => {
   try {
     const { firstName, lastName, password } = req.body || {};
     if (!firstName || !lastName || !password) {
@@ -20,27 +20,63 @@ router.post('/auth/register', async (req, res) => {
     const jmbag = await generateUniqueJmbag();
     const passwordHash = await bcrypt.hash(String(password), 10);
 
-    const student = await prisma.student.create({
-      data: {
-        jmbag,
-        firstName: String(firstName).trim(),
-        lastName: String(lastName).trim(),
-        email: email.toLowerCase(),
-        passwordHash,
-        enrolledYear: 1,
-        repeatingYear: false,
-        module: null,
-        enrollingThisYear: true, // ostavljeno kao u originalnom kodu
-      },
-      select: {
-        id: true, jmbag: true, firstName: true, lastName: true, email: true,
-        enrolledYear: true, repeatingYear: true, module: true, enrollingThisYear: true,
-        createdAt: true, updatedAt: true,
-      },
+    const result = await prisma.$transaction(async (tx) => {
+      const student = await tx.student.create({
+        data: {
+          jmbag,
+          firstName: String(firstName).trim(),
+          lastName: String(lastName).trim(),
+          email: email.toLowerCase(),
+          passwordHash,
+          enrolledYear: 1,
+          repeatingYear: false,
+          module: null,
+          enrollmentStep: 3,
+          enrollmentYearSelected: true,
+          enrollmentCoursesSelected: true,
+          enrollmentDocumentsSubmitted: true,
+          enrollmentCompleted: true,
+        },
+        select: {
+          id: true,
+          jmbag: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          enrolledYear: true,
+          repeatingYear: true,
+          module: true,
+          enrollmentStep: true,
+          enrollmentYearSelected: true,
+          enrollmentCoursesSelected: true,
+          enrollmentDocumentsSubmitted: true,
+          enrollmentCompleted: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      const year1Courses = await tx.course.findMany({
+        where: { year: 1 },
+        select: { id: true, semester: true },
+      });
+
+      if (year1Courses.length > 0) {
+        const activeRows = year1Courses.map((c) => ({
+          studentId: student.id,
+          courseId: c.id,
+          status: 'ACTIVE',
+          assignedYear: 1,
+          assignedSemester: c.semester, // 1 ili 2
+        }));
+        await tx.studentCourse.createMany({ data: activeRows });
+      }
+
+      return { student };
     });
 
-    const token = issueJwt(student);
-    res.status(201).json({ user: student, token });
+    const token = issueJwt(result.student);
+    res.status(201).json({ user: result.student, token });
   } catch (err) {
     console.error('Greška pri registraciji:', err);
     if (err?.code === 'P2002') {
@@ -48,7 +84,7 @@ router.post('/auth/register', async (req, res) => {
     }
     res.status(500).json({ error: 'Interna greška servera' });
   }
-});
+});;
 
 // POST /auth/login
 router.post('/auth/login', async (req, res) => {

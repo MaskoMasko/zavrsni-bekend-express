@@ -1,12 +1,12 @@
 {
   "name": "studenti-service",
   "version": "1.0.0",
-  "main": "src/server.js",
+  "main": "src/index.js",
   "license": "MIT",
   "type": "commonjs",
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "seed": "node prisma/seed.js"
