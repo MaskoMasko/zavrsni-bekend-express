@@ -18,14 +18,14 @@ model Student {
   repeatingYear Boolean @default(false)
   module        String?
 
-  // Enrollment step tracking
-  enrollmentStep               Int     @default(0) // 0=none, 1=year, 2=courses, 3=documents
+  // Praćenje koraka upisa
+  enrollmentStep               Int     @default(0)
   enrollmentYearSelected       Boolean @default(false)
   enrollmentCoursesSelected    Boolean @default(false)
   enrollmentDocumentsSubmitted Boolean @default(false)
   enrollmentCompleted          Boolean @default(false)
 
-  totalEcts   Int @default(0) // sum ECTS from PASSED courses
+  totalEcts   Int @default(0)
   passedCount Int @default(0)
   failedCount Int @default(0)
   activeCount Int @default(0)
@@ -48,6 +48,7 @@ model Course {
   ects           Int
   semester       Int
   year           Int
+  capacity       Int      @default(30)
   prerequisite   Course?  @relation("CoursePrerequisite", fields: [prerequisiteId], references: [id])
   prerequisiteId Int?
   dependents     Course[] @relation("CoursePrerequisite")
@@ -63,7 +64,7 @@ model StudentCourse {
   studentId        Int
   course           Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
   courseId         Int
-  status           String // 'PASSED' | 'FAILED' | 'ACTIVE'
+  status           String
   assignedYear     Int
   assignedSemester Int
   createdAt        DateTime @default(now())
@@ -78,7 +79,7 @@ model StudentDocument {
   id         Int      @id @default(autoincrement())
   student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
   studentId  Int
-  type       String // 'upisniObrazac' | 'uplatnica' | 'potvrdaUplatnice'
+  type       String
   filename   String
   path       String
   mime       String
