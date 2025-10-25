@@ -1,6 +1,6 @@
 const express = require('express');
 const prisma = require('../prisma');
-const { ensureYear, ensureModule } = require('../helpers/util');
+const { ensureYear, ensureModule } = require('../helpers/utils');
 const { yearSemesters } = require('../config');
 const { getActiveCoursesPayload, sendActiveCoursesPdf, sendActiveCoursesCsv } = require('../helpers/activeCourses');
 

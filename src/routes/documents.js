@@ -1,5 +1,5 @@
 const express = require('express');
-const { upload, ensureStudentAndType } = require('../middleware/upload');
+const { upload, ensureStudentAndType } = require('../middlware/upload');
 const PDFDocument = require('pdfkit');
 const prisma = require('../prisma');
 const { ALLOWED_DOC_TYPES } = require('../config');

@@ -1,12 +1,12 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const prisma = require('../prisma');
-const { generateUniqueStudentEmail, generateUniqueJmbag, issueJwt } = require('../helpers/util');
+const { generateUniqueStudentEmail, generateUniqueJmbag, issueJwt } = require('../helpers/utils');
 
 const router = express.Router();
 
 // POST /auth/register
-app.post('/auth/register', async (req, res) => {
+router.post('/auth/register', async (req, res) => {
   try {
     const { firstName, lastName, password } = req.body || {};
     if (!firstName || !lastName || !password) {
