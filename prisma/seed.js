@@ -1,8 +1,6 @@
-/* prisma/seed.js */
 require('dotenv').config();
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
-
 const prisma = new PrismaClient();
 
 /* ----------- Helperi ----------- */
@@ -38,6 +36,18 @@ function generateStudentEmail(firstName, lastName, idx) {
   return `${fi}${ln}${idx}@student.edu.hr`;
 }
 
+// Staff email generator (simple)
+function staffEmailFromName(fullName, domain = 'uni.hr') {
+  // e.g. "dr.sc. Marko Markić" -> "marko.markic@uni.hr"
+  const nameOnly = fullName
+    .replace(/dr\.sc\.|doc\.dr\.sc\.|mr\.sc\.|lekt\.|doc\.|prof\.|ing\./gi, '')
+    .trim();
+  const parts = nameOnly.split(/\s+/).filter(Boolean);
+  const ascii = parts.map(toAsciiLettersLower);
+  if (ascii.length === 1) return `${ascii[0]}@${domain}`;
+  return `${ascii[0]}.${ascii[ascii.length - 1]}@${domain}`;
+}
+
 /* ----------- Kolegiji ----------- */
 const courseData = [
   // Semestar 1 (Godina 1)
@@ -47,6 +57,7 @@ const courseData = [
   { name: 'Engleski jezik 1', holder: 'lekt. Petra Petrić', description: 'Akademski engleski za IT.', ects: 4, semester: 1, year: 1 },
   { name: 'Diskretna matematika', holder: 'dr.sc. Ivan Ivić', description: 'Skupovi, relacije, grafovi.', ects: 5, semester: 1, year: 1 },
   { name: 'Vještine učenja i istraživanja', holder: 'doc.dr.sc. Ema Emić', description: 'Učenje, istraživanje i pisanje.', ects: 4, semester: 1, year: 1 },
+
   // Semestar 2 (Godina 1)
   { name: 'Programiranje 2', holder: 'dr.sc. Marko Markić', description: 'Strukture podataka, OOP osnove.', ects: 6, semester: 2, year: 1, prerequisiteName: 'Uvod u programiranje' },
   { name: 'Matematika 2', holder: 'dr.sc. Ana Anić', description: 'Nastavak matematičke analize.', ects: 6, semester: 2, year: 1, prerequisiteName: 'Matematika 1' },
@@ -54,6 +65,7 @@ const courseData = [
   { name: 'Engleski jezik 2', holder: 'lekt. Petra Petrić', description: 'Napredni akademski engleski za IT.', ects: 4, semester: 2, year: 1, prerequisiteName: 'Engleski jezik 1' },
   { name: 'Osnove baza podataka', holder: 'dr.sc. Mia Mijić', description: 'Relacijske baze, SQL osnove.', ects: 5, semester: 2, year: 1, prerequisiteName: 'Osnove računarstva' },
   { name: 'Sustavi i mreže', holder: 'dr.sc. Sara Sarić', description: 'Operativni sustavi i mrežni koncepti.', ects: 5, semester: 2, year: 1 },
+
   // Semestar 3 (Godina 2)
   { name: 'Objektno orijentirano programiranje', holder: 'dr.sc. Iva Ivić', description: 'Napredni OOP obrasci i praksa.', ects: 6, semester: 3, year: 2, prerequisiteName: 'Programiranje 2' },
   { name: 'Operacijski sustavi', holder: 'dr.sc. Luka Lukić', description: 'Koncepti OS-a i implementacije.', ects: 6, semester: 3, year: 2 },
@@ -61,6 +73,7 @@ const courseData = [
   { name: 'Vjerojatnost i statistika', holder: 'dr.sc. Ivan Ivić', description: 'Temelji statistike za računarstvo.', ects: 6, semester: 3, year: 2 },
   { name: 'Web tehnologije', holder: 'doc.dr.sc. Filip Filić', description: 'Frontend i backend osnove.', ects: 5, semester: 3, year: 2 },
   { name: 'Tehnike komunikacije', holder: 'mr.sc. Ema Emić', description: 'Prezentacijske i timske vještine.', ects: 4, semester: 3, year: 2 },
+
   // Semestar 4 (Godina 2)
   { name: 'Računalne arhitekture', holder: 'dr.sc. Luka Lukić', description: 'Napredne arhitekture i performanse.', ects: 5, semester: 4, year: 2 },
   { name: 'Softversko inženjerstvo', holder: 'dr.sc. Marko Markić', description: 'Procesi razvoja i kvaliteta softvera.', ects: 6, semester: 4, year: 2 },
@@ -68,6 +81,7 @@ const courseData = [
   { name: 'Napredne baze podataka', holder: 'dr.sc. Mia Mijić', description: 'Optimizacija, NoSQL, distribuirane baze.', ects: 5, semester: 4, year: 2 },
   { name: 'Strojno učenje', holder: 'dr.sc. Iva Ivić', description: 'Temelji ML-a i primjene.', ects: 6, semester: 4, year: 2 },
   { name: 'Praktični projekt 1', holder: 'doc.dr.sc. Filip Filić', description: 'Timskih projekt s mentorstvom.', ects: 5, semester: 4, year: 2 },
+
   // Semestar 5 (Godina 3)
   { name: 'Distribuirani sustavi', holder: 'dr.sc. Sara Sarić', description: 'Skalabilnost, konzistencija, komunikacija.', ects: 6, semester: 5, year: 3 },
   { name: 'Sigurnost informacijskih sustava', holder: 'dr.sc. Luka Lukić', description: 'Kriptografija, sigurnosne politike.', ects: 6, semester: 5, year: 3 },
@@ -75,6 +89,7 @@ const courseData = [
   { name: 'Mobilne aplikacije', holder: 'dr.sc. Marko Markić', description: 'Android/iOS razvoj i UX.', ects: 6, semester: 5, year: 3 },
   { name: 'Cloud računarstvo', holder: 'dr.sc. Mia Mijić', description: 'IaaS, PaaS, DevOps alati.', ects: 5, semester: 5, year: 3 },
   { name: 'Poduzetništvo i inovacije', holder: 'mr.sc. Ema Emić', description: 'Osnove poduzetništva u IT-u.', ects: 4, semester: 5, year: 3 },
+
   // Semestar 6 (Godina 3)
   { name: 'Napredne web aplikacije', holder: 'doc.dr.sc. Filip Filić', description: 'SPA, SSR i performanse.', ects: 6, semester: 6, year: 3 },
   { name: 'Big Data tehnologije', holder: 'dr.sc. Sara Sarić', description: 'Hadoop ekosustav, stream obrada.', ects: 6, semester: 6, year: 3 },
@@ -93,11 +108,23 @@ async function main() {
   await prisma.student.deleteMany();
 
   /* ---- Seed kolegija ---- */
-  for (const c of courseData) {
+  // assistant pool (demo)
+  const assistants = [
+    'asst. Ivana Horvat', 'asst. Tomislav Kovač', 'asst. Marija Novak',
+    'asst. Petra Jurić', 'asst. Dario Marin', 'asst. Lea Grgić',
+    'asst. Luka Pavić', 'asst. Nina Babić', 'asst. Karlo Klarić', 'asst. Dora Perić'
+  ];
+
+  for (let i = 0; i < courseData.length; i++) {
+    const c = courseData[i];
+    const assistant = assistants[i % assistants.length];
     await prisma.course.create({
       data: {
         name: c.name,
         holder: c.holder,
+        holderEmail: staffEmailFromName(c.holder, 'uni.hr'),
+        assistant,
+        assistantEmail: staffEmailFromName(assistant, 'uni.hr'),
         description: c.description,
         ects: c.ects,
         semester: c.semester,
@@ -120,6 +147,7 @@ async function main() {
     acc[c.semester].push(c);
     return acc;
   }, {});
+  const courseECTS = new Map(courses.map(c => [c.id, c.ects]));
   const yearSemesters = { 1: [1, 2], 2: [3, 4], 3: [5, 6] };
 
   /* ---- Upisi helperi ---- */
@@ -192,6 +220,7 @@ async function main() {
 
   const FIRST_NAMES = ['Ana','Marko','Iva','Luka','Petra','Ivan','Mia','Filip','Ema','Sara','Josip','Karlo','Nina','Dora','Laura','Tin','Lea','Vito','Matea','Paula'];
   const LAST_NAMES = ['Anić','Markić','Ivić','Lukić','Petrić','Mijić','Filić','Emić','Sarić','Pavić','Babić','Perić','Kovač','Horvat','Novak','Klarić','Grgić','Marin','Jurić'];
+
   const MODULES = ['MMS', 'RPP', 'BIZ'];
   const moduleCapacity = { MMS: 10, RPP: 10, BIZ: 10 };
   const moduleCounts = { MMS: 0, RPP: 0, BIZ: 0 };
@@ -202,10 +231,10 @@ async function main() {
     const lastName = LAST_NAMES[(i * 3) % LAST_NAMES.length];
     const enrolledYear = ensureYear(1 + (i % 3)); // 1..3
     const repeatingYear = Math.random() < 0.2;    // ~20% ponavljača
-    let module = null;
 
+    // Modul: za 3. godinu s max 10 po modulu (višak ostaje null)
+    let module = null;
     if (enrolledYear === 3) {
-      // Round-robin po modulima uz kapacitet max 10
       for (let attempt = 0; attempt < MODULES.length; attempt++) {
         const mod = MODULES[(i + attempt) % MODULES.length];
         if (moduleCounts[mod] < moduleCapacity[mod]) {
@@ -214,7 +243,6 @@ async function main() {
           break;
         }
       }
-      // Ako su svi moduli puni (30/30), module ostaje null
     }
 
     const email = generateStudentEmail(firstName, lastName, i + 1);
@@ -237,6 +265,10 @@ async function main() {
         enrollmentCoursesSelected: false,
         enrollmentDocumentsSubmitted: false,
         enrollmentCompleted: false,
+        totalEcts: 0,
+        passedCount: 0,
+        failedCount: 0,
+        activeCount: 0,
       },
     });
     students.push(created);
@@ -309,8 +341,25 @@ async function main() {
     await prisma.studentCourse.createMany({ data: allEnrollments });
   }
 
-  // postavi statuse na Student
+  // ---- Compute per-student stats from allEnrollments and update students ----
+  const statsByStudent = new Map(); // id -> {passedCount, failedCount, activeCount, totalEcts}
+  for (const e of allEnrollments) {
+    const s = statsByStudent.get(e.studentId) || { passedCount: 0, failedCount: 0, activeCount: 0, totalEcts: 0 };
+    if (e.status === 'PASSED') {
+      s.passedCount += 1;
+      s.totalEcts += (courseECTS.get(e.courseId) || 0);
+    } else if (e.status === 'FAILED') {
+      s.failedCount += 1;
+    } else if (e.status === 'ACTIVE') {
+      s.activeCount += 1;
+    }
+    statsByStudent.set(e.studentId, s);
+  }
+
+  // postavi statuse na Student i stats
   for (const student of students) {
+    const st = statsByStudent.get(student.id) || { passedCount: 0, failedCount: 0, activeCount: 0, totalEcts: 0 };
+
     if (isCompleted.has(student.id)) {
       await prisma.student.update({
         where: { id: student.id },
@@ -320,6 +369,10 @@ async function main() {
           enrollmentCoursesSelected: true,
           enrollmentDocumentsSubmitted: true,
           enrollmentCompleted: true,
+          totalEcts: st.totalEcts,
+          passedCount: st.passedCount,
+          failedCount: st.failedCount,
+          activeCount: st.activeCount,
         },
       });
     } else if (isStep2.has(student.id)) {
@@ -331,6 +384,10 @@ async function main() {
           enrollmentCoursesSelected: true,
           enrollmentDocumentsSubmitted: false,
           enrollmentCompleted: false,
+          totalEcts: st.totalEcts,
+          passedCount: st.passedCount,
+          failedCount: st.failedCount,
+          activeCount: st.activeCount,
         },
       });
     } else if (isStep1.has(student.id)) {
@@ -342,10 +399,23 @@ async function main() {
           enrollmentCoursesSelected: false,
           enrollmentDocumentsSubmitted: false,
           enrollmentCompleted: false,
+          totalEcts: st.totalEcts,
+          passedCount: st.passedCount,
+          failedCount: st.failedCount,
+          activeCount: st.activeCount,
         },
       });
     } else {
-      // ostaju na koraku 0 (već postavljeno pri kreiranju)
+      // Step 0 - no changes to steps, but still update stats if any
+      await prisma.student.update({
+        where: { id: student.id },
+        data: {
+          totalEcts: st.totalEcts,
+          passedCount: st.passedCount,
+          failedCount: st.failedCount,
+          activeCount: st.activeCount,
+        },
+      });
     }
   }
 
@@ -360,7 +430,8 @@ async function main() {
   const step0Student = students.find(s => s.id === step0StudentId);
 
   console.log('Seed završen: 36 kolegija + 100 studenata (90 completed, 5 step2, 5 step1) + upisi (PASSED/FAILED/ACTIVE).');
-  console.log('Kapacitet modula (max 10 po modulu):', { ...moduleCounts });
+  console.log('Kapacitet modula (max 10 po modulu):', { MMS: 0, RPP: 0, BIZ: 0, ...moduleCounts });
+
   if (completedStudent) {
     console.log('TEST LOGIN (COMPLETED):', {
       id: completedStudent.id,
@@ -369,6 +440,7 @@ async function main() {
       enrolledYear: completedStudent.enrolledYear,
       module: completedStudent.module,
       status: 'completed',
+      stats: statsByStudent.get(completedStudent.id) || {},
     });
   }
   if (step0Student) {
@@ -379,6 +451,7 @@ async function main() {
       enrolledYear: step0Student.enrolledYear,
       module: step0Student.module,
       status: 'step0',
+      stats: statsByStudent.get(step0Student.id) || {},
     });
   }
 }

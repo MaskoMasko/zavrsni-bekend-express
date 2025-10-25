@@ -18,12 +18,17 @@ model Student {
   repeatingYear Boolean @default(false)
   module        String?
 
-  // Praćenje koraka upisa
-  enrollmentStep               Int     @default(0) // 0=ništa, 1=godina, 2=predmeti, 3=dokumenti
+  // Enrollment step tracking
+  enrollmentStep               Int     @default(0) // 0=none, 1=year, 2=courses, 3=documents
   enrollmentYearSelected       Boolean @default(false)
   enrollmentCoursesSelected    Boolean @default(false)
   enrollmentDocumentsSubmitted Boolean @default(false)
   enrollmentCompleted          Boolean @default(false)
+
+  totalEcts   Int @default(0) // sum ECTS from PASSED courses
+  passedCount Int @default(0)
+  failedCount Int @default(0)
+  activeCount Int @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -36,6 +41,9 @@ model Course {
   id             Int      @id @default(autoincrement())
   name           String   @unique
   holder         String
+  holderEmail    String?
+  assistant      String?
+  assistantEmail String?
   description    String
   ects           Int
   semester       Int
