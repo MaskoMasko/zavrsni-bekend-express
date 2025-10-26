@@ -39,7 +39,6 @@ describe('Auth Routes', () => {
 
     describe('POST /login', () => {
         beforeEach(async () => {
-            // Kreiraj testnog studenta za login
             await request(app)
                 .post('/register')
                 .send({

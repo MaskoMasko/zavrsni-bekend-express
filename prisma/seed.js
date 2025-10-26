@@ -388,7 +388,6 @@ async function main() {
   await prisma.course.deleteMany();
   await prisma.student.deleteMany();
 
-  /* ---- Seed kolegija ---- */
   const assistants = [
     "asst. Ivana Horvat",
     "asst. Tomislav Kovač",
@@ -540,7 +539,6 @@ async function main() {
     for (const course of newCandidates) tryAdd(course);
   }
 
-  /* ---- Seed 100 studenata ---- */
   const plainPassword = "Lozinka123!";
   const passwordHash = await bcrypt.hash(plainPassword, 10);
 
@@ -596,7 +594,6 @@ async function main() {
     const enrolledYear = ensureYear(1 + (i % 3)); // 1..3
     const repeatingYear = Math.random() < 0.2; // ~20% ponavljača
 
-    // Modul: slobodna raspodjela bez kapaciteta (po zahtjevu da kapacitet bude po kolegiju, ne po modulima)
     const module = enrolledYear === 3 ? MODULES[i % MODULES.length] : null;
 
     const email = generateStudentEmail(firstName, lastName, i + 1);
@@ -629,7 +626,6 @@ async function main() {
     students.push(created);
   }
 
-  // raspodjela koraka: 90 completed, 5 step2, 4 step1, 1 step0 (garantira barem jednog step0)
   const shuffled = [...students].sort(() => Math.random() - 0.5);
   const completedList = shuffled.slice(0, 90).map((s) => s.id);
   const step2List = shuffled.slice(90, 95).map((s) => s.id);
@@ -641,7 +637,6 @@ async function main() {
   const isStep1 = new Set(step1List);
   let isStep0 = new Set(step0List);
 
-  // Sigurnosna provjera: ako nemamo step0, odredi jednog
   if (step0List.length === 0) {
     const candidate = students.find(
       (s) => !isCompleted.has(s.id) && !isStep2.has(s.id) && !isStep1.has(s.id)
@@ -650,7 +645,6 @@ async function main() {
       step0List = [candidate.id];
       isStep0 = new Set(step0List);
     } else {
-      // fallback: prebaci jednog iz step1 u step0
       const sid = step1List.pop();
       isStep1.delete(sid);
       step0List = [sid];
@@ -665,7 +659,6 @@ async function main() {
     const failedBySem = {};
     const activeSet = new Set();
 
-    // PASSED/FAILED povijest za prethodne godine
     for (let y = 1; y < student.enrolledYear; y++) {
       collectYearHistory(student, y, allEnrollments, passedSet, failedBySem);
     }
@@ -679,7 +672,6 @@ async function main() {
       );
     }
 
-    // ACTIVE samo za completed ili step2
     if (isCompleted.has(student.id) || isStep2.has(student.id)) {
       const [currentOdd, currentEven] = yearSemesters[student.enrolledYear];
       const priorOdds = [1, 3, 5].filter((s) => s < currentOdd);
@@ -717,12 +709,10 @@ async function main() {
     }
   }
 
-  // Upis svih upisa u bazu
   if (allEnrollments.length) {
     await prisma.studentCourse.createMany({ data: allEnrollments });
   }
 
-  // ---- Compute per-student stats from allEnrollments and update students ----
   const statsByStudent = new Map(); // id -> {passedCount, failedCount, activeCount, totalEcts}
   for (const e of allEnrollments) {
     const s = statsByStudent.get(e.studentId) || {
@@ -742,7 +732,6 @@ async function main() {
     statsByStudent.set(e.studentId, s);
   }
 
-  // postavi statuse na Student i stats
   for (const student of students) {
     const st = statsByStudent.get(student.id) || {
       passedCount: 0,
@@ -810,7 +799,6 @@ async function main() {
     }
   }
 
-  // LOG ZA TESTIRANJE: jedan completed i jedan step0 + sample course capacities
   const completedStudentId = completedList[0];
   const step0StudentId = step0List[0];
   const completedStudent = students.find((s) => s.id === completedStudentId);
