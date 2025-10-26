@@ -24,4 +24,6 @@ app.use(documentsRoutes);
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server sluša na portu ${PORT}`);
-});
+})
+
+module.exports = app;
