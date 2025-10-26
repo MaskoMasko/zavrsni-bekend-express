@@ -1,5 +1,6 @@
 const express = require("express");
 const prisma = require("../prisma");
+const PDFDocument = require('pdfkit');
 
 const router = express.Router();
 
@@ -563,6 +564,220 @@ router.get("/courses/:id", async (req, res) => {
     console.error("Greška pri dohvaćanju kolegija:", err);
     res.status(500).json({ error: "Interna greška servera" });
   }
+});
+
+// GET /students/:id/transcript - Transkript predmeta (svi polozeni predmeti)
+router.get('/students/:id(\\d+)/transcript', async (req, res) => {
+    const studentId = Number(req.params.id);
+    if (!Number.isInteger(studentId)) {
+        return res.status(400).json({ error: 'Neispravan studentId' });
+    }
+
+    try {
+        const student = await prisma.student.findUnique({
+            where: { id: studentId },
+            select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                jmbag: true,
+                email: true,
+                enrolledYear: true,
+                module: true,
+                createdAt: true,
+            },
+        });
+
+        if (!student) {
+            return res.status(404).json({ error: 'Student nije pronađen' });
+        }
+
+        const passedCourses = await prisma.studentCourse.findMany({
+            where: {
+                studentId,
+                status: 'PASSED',
+            },
+            include: {
+                course: {
+                    select: {
+                        name: true,
+                        ects: true,
+                        semester: true,
+                        year: true,
+                    },
+                },
+            },
+            orderBy: [
+                { assignedYear: 'asc' },
+                { assignedSemester: 'asc' },
+            ],
+        });
+
+        const coursesByYear = {};
+        let totalEcts = 0;
+
+        passedCourses.forEach(enrollment => {
+            const year = enrollment.assignedYear;
+            if (!coursesByYear[year]) {
+                coursesByYear[year] = [];
+            }
+
+            coursesByYear[year].push({
+                name: enrollment.course.name,
+                ects: enrollment.course.ects,
+                semester: enrollment.assignedSemester,
+                originalSemester: enrollment.course.semester,
+                originalYear: enrollment.course.year,
+            });
+
+            totalEcts += enrollment.course.ects;
+        });
+
+        const filename = `transkript_${student.jmbag}.pdf`;
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+        const doc = new PDFDocument({ size: 'A4', margin: 50 });
+        doc.pipe(res);
+
+        doc.fontSize(20).text('TRANSKRIPT PREDMETA', { align: 'center' });
+        doc.moveDown();
+
+        doc.fontSize(12);
+        doc.text(`Student: ${student.firstName} ${student.lastName}`);
+        doc.text(`JMBAG: ${student.jmbag}`);
+        doc.text(`Email: ${student.email}`);
+        doc.text(`Modul: ${student.module || 'Nije definiran'}`);
+        doc.text(`Godina upisa: ${student.createdAt.getFullYear()}`);
+        doc.moveDown();
+
+        doc.fontSize(14).text(`UKUPNO OSTVARENIH ECTS BODOVA: ${totalEcts}`, { underline: true });
+        doc.moveDown();
+
+        Object.keys(coursesByYear).sort().forEach(year => {
+            doc.fontSize(14).text(`${year}. GODINA STUDIJA`, { underline: true });
+            doc.moveDown(0.5);
+
+            const yearCourses = coursesByYear[year];
+            let yearEcts = 0;
+
+            yearCourses.forEach((course, index) => {
+                doc.fontSize(10);
+                doc.text(`${index + 1}. ${course.name}`, { continued: true });
+                doc.text(` - ${course.ects} ECTS`, { align: 'right' });
+                doc.fontSize(8);
+                doc.text(`Semestar: ${course.semester} | Izvorni semestar: ${course.originalSemester}`);
+                yearEcts += course.ects;
+            });
+
+            doc.moveDown(0.5);
+            doc.fontSize(10).text(`ECTS ${year}. godine: ${yearEcts}`, { align: 'right' });
+            doc.moveDown();
+        });
+
+        doc.moveDown(2);
+        doc.fontSize(10);
+        doc.text('_________________________________________', { align: 'right' });
+        doc.text('Potpis dekan/delegiranog službenika', { align: 'right' });
+        doc.text(`Izgenerirano: ${new Date().toLocaleDateString('hr-HR')}`, { align: 'right' });
+
+        doc.end();
+    } catch (err) {
+        console.error('GET /students/:id/transcript error:', err);
+        res.status(500).json({ error: 'Interna greška servera' });
+    }
+});
+
+// GET /students/:id/study-confirmation - Potvrda o studiranju
+router.get('/students/:id(\\d+)/study-confirmation', async (req, res) => {
+    const studentId = Number(req.params.id);
+    if (!Number.isInteger(studentId)) {
+        return res.status(400).json({ error: 'Neispravan studentId' });
+    }
+
+    try {
+        const student = await prisma.student.findUnique({
+            where: { id: studentId },
+            select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                jmbag: true,
+                email: true,
+                enrolledYear: true,
+                module: true,
+                repeatingYear: true,
+                createdAt: true,
+            },
+        });
+
+        if (!student) {
+            return res.status(404).json({ error: 'Student nije pronađen' });
+        }
+
+        const filename = `potvrda_o_studiranju_${student.jmbag}.pdf`;
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+        const doc = new PDFDocument({ size: 'A4', margin: 50 });
+        doc.pipe(res);
+
+        doc.fontSize(16).text('SVEUCILISTE', { align: 'center' });
+        doc.fontSize(14).text('FAKULTET INFORMATICKIH TEHNOLOGIJA', { align: 'center' });
+        doc.moveDown();
+        doc.fontSize(18).text('POTVRDA O STUDIRANJU', { align: 'center', underline: true });
+        doc.moveDown(2);
+
+        doc.fontSize(12);
+        doc.text('Potvrdjujemo da je:');
+        doc.moveDown();
+
+        doc.fontSize(14);
+        doc.text(`${student.firstName} ${student.lastName}`, { align: 'center' });
+        doc.fontSize(12);
+        doc.text(`JMBAG: ${student.jmbag}`, { align: 'center' });
+        doc.moveDown();
+
+        doc.text('redoviti student ovog sveucilista i trenutno pohadja:');
+        doc.moveDown();
+
+        doc.fontSize(14);
+        doc.text(`${student.enrolledYear}. godinu studija`, { align: 'center' });
+        doc.fontSize(12);
+        doc.text(`Studijski program: ${student.module || 'Racunarstvo'}`, { align: 'center' });
+        doc.moveDown();
+
+        if (student.repeatingYear) {
+            doc.text('NAPOMENA: Student ponavlja godinu studija.', { color: 'red', align: 'center' });
+            doc.moveDown();
+        }
+
+        const currentYear = new Date().getFullYear();
+        const nextYear = currentYear + 1;
+        doc.text(`Potvrda vrijedi za akademsku godinu ${currentYear}/${nextYear}.`);
+        doc.moveDown(2);
+
+        doc.text(`U ${new Date().toLocaleDateString('hr-HR', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        })}`);
+        doc.moveDown(3);
+
+        doc.text('_________________________________________', { align: 'right' });
+        doc.text('Dekan/delegirani sluzbenik', { align: 'right' });
+        doc.moveDown();
+        doc.fontSize(10).text('(pecat i potpis)', { align: 'right' });
+
+        doc.moveDown(4);
+        doc.fontSize(8);
+        doc.text('Napomena: Ova potvrda automatski je generirana i vrijedi bez potpisa i pecata samo uz online provjeru valjanosti.', { align: 'center' });
+
+        doc.end();
+    } catch (err) {
+        console.error('GET /students/:id/study-confirmation error:', err);
+        res.status(500).json({ error: 'Interna greška servera' });
+    }
 });
 
 module.exports = router;
