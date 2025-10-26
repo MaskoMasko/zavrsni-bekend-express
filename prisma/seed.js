@@ -2,7 +2,6 @@
 require("dotenv").config();
 const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
-
 const prisma = new PrismaClient();
 
 /* ----------- Helperi ----------- */
@@ -62,6 +61,7 @@ function generateStudentEmail(firstName, lastName, idx) {
 }
 // Staff email generator (simple)
 function staffEmailFromName(fullName, domain = "uni.hr") {
+  // e.g. "dr.sc. Marko Markić" -> "marko.markic@uni.hr"
   const nameOnly = fullName
     .replace(/dr\.sc\.|doc\.dr\.sc\.|mr\.sc\.|lekt\.|doc\.|prof\.|ing\./gi, "")
     .trim();
@@ -130,6 +130,55 @@ const courseData = [
   },
   // Semestar 2 (Godina 1)
   {
+    name: "Operacijski sustavi",
+    holder: "dr.sc. Luka Lukić",
+    description: "Koncepti OS-a i implementacije.",
+    ects: 6,
+    semester: 3,
+    year: 2,
+  },
+  {
+    name: "Upravljanje bazama podataka",
+    holder: "dr.sc. Petra Petrić",
+    description: "Modeliranje, normalizacija, administracija.",
+    ects: 5,
+    semester: 3,
+    year: 2,
+  },
+  {
+    name: "Algoritmi i strukture podataka",
+    holder: "doc.dr.sc. Filip Filić",
+    description: "Analiza i dizajn algoritama.",
+    ects: 6,
+    semester: 2,
+    year: 1,
+  },
+  {
+    name: "Računalne arhitekture",
+    holder: "dr.sc. Luka Lukić",
+    description: "Napredne arhitekture i performanse.",
+    ects: 5,
+    semester: 4,
+    year: 2,
+  },
+  {
+    name: "Softversko inženjerstvo",
+    holder: "dr.sc. Marko Markić",
+    description: "Procesi razvoja i kvaliteta softvera.",
+    ects: 6,
+    semester: 4,
+    year: 2,
+  },
+  {
+    name: "Sustavi i mreže",
+    holder: "dr.sc. Sara Sarić",
+    description: "Operativni sustavi i mrežni koncepti.",
+    ects: 5,
+    semester: 2,
+    year: 1,
+  },
+  // Semestar 3 (Godina 2)
+  {
     name: "Programiranje 2",
     holder: "dr.sc. Marko Markić",
     description: "Strukture podataka, OOP osnove.",
@@ -148,41 +197,6 @@ const courseData = [
     prerequisiteName: "Matematika 1",
   },
   {
-    name: "Algoritmi i strukture podataka",
-    holder: "doc.dr.sc. Filip Filić",
-    description: "Analiza i dizajn algoritama.",
-    ects: 6,
-    semester: 2,
-    year: 1,
-  },
-  {
-    name: "Engleski jezik 2",
-    holder: "lekt. Petra Petrić",
-    description: "Napredni akademski engleski za IT.",
-    ects: 4,
-    semester: 2,
-    year: 1,
-    prerequisiteName: "Engleski jezik 1",
-  },
-  {
-    name: "Osnove baza podataka",
-    holder: "dr.sc. Mia Mijić",
-    description: "Relacijske baze, SQL osnove.",
-    ects: 5,
-    semester: 2,
-    year: 1,
-    prerequisiteName: "Osnove računarstva",
-  },
-  {
-    name: "Sustavi i mreže",
-    holder: "dr.sc. Sara Sarić",
-    description: "Operativni sustavi i mrežni koncepti.",
-    ects: 5,
-    semester: 2,
-    year: 1,
-  },
-  // Semestar 3 (Godina 2)
-  {
     name: "Objektno orijentirano programiranje",
     holder: "dr.sc. Iva Ivić",
     description: "Napredni OOP obrasci i praksa.",
@@ -190,22 +204,6 @@ const courseData = [
     semester: 3,
     year: 2,
     prerequisiteName: "Programiranje 2",
-  },
-  {
-    name: "Operacijski sustavi",
-    holder: "dr.sc. Luka Lukić",
-    description: "Koncepti OS-a i implementacije.",
-    ects: 6,
-    semester: 3,
-    year: 2,
-  },
-  {
-    name: "Upravljanje bazama podataka",
-    holder: "dr.sc. Petra Petrić",
-    description: "Modeliranje, normalizacija, administracija.",
-    ects: 5,
-    semester: 3,
-    year: 2,
   },
   {
     name: "Vjerojatnost i statistika",
@@ -233,20 +231,22 @@ const courseData = [
   },
   // Semestar 4 (Godina 2)
   {
-    name: "Računalne arhitekture",
-    holder: "dr.sc. Luka Lukić",
-    description: "Napredne arhitekture i performanse.",
-    ects: 5,
-    semester: 4,
-    year: 2,
+    name: "Engleski jezik 2",
+    holder: "lekt. Petra Petrić",
+    description: "Napredni akademski engleski za IT.",
+    ects: 4,
+    semester: 2,
+    year: 1,
+    prerequisiteName: "Engleski jezik 1",
   },
   {
-    name: "Softversko inženjerstvo",
-    holder: "dr.sc. Marko Markić",
-    description: "Procesi razvoja i kvaliteta softvera.",
-    ects: 6,
-    semester: 4,
-    year: 2,
+    name: "Osnove baza podataka",
+    holder: "dr.sc. Mia Mijić",
+    description: "Relacijske baze, SQL osnove.",
+    ects: 5,
+    semester: 2,
+    year: 1,
+    prerequisiteName: "Osnove računarstva",
   },
   {
     name: "Računalne mreže",
@@ -596,7 +596,7 @@ async function main() {
     const enrolledYear = ensureYear(1 + (i % 3)); // 1..3
     const repeatingYear = Math.random() < 0.2; // ~20% ponavljača
 
-    // Module: distributed without capacity constraint (capacity is per-course, not per-module)
+    // Modul: slobodna raspodjela bez kapaciteta (po zahtjevu da kapacitet bude po kolegiju, ne po modulima)
     const module = enrolledYear === 3 ? MODULES[i % MODULES.length] : null;
 
     const email = generateStudentEmail(firstName, lastName, i + 1);
@@ -650,6 +650,7 @@ async function main() {
       step0List = [candidate.id];
       isStep0 = new Set(step0List);
     } else {
+      // fallback: prebaci jednog iz step1 u step0
       const sid = step1List.pop();
       isStep1.delete(sid);
       step0List = [sid];
@@ -684,23 +685,16 @@ async function main() {
       const priorOdds = [1, 3, 5].filter((s) => s < currentOdd);
       const priorEvens = [2, 4, 6].filter((s) => s < currentEven);
 
-      const retakeOddRaw = [
+      const retakeOdd = [
         ...priorOdds.flatMap((s) => failedBySem[s] || []),
         ...(student.repeatingYear ? failedBySem[currentOdd] || [] : []),
       ];
-      const retakeEvenRaw = [
+      const retakeEven = [
         ...priorEvens.flatMap((s) => failedBySem[s] || []),
         ...(student.repeatingYear ? failedBySem[currentEven] || [] : []),
       ];
-
-      // RULE: same academic year (winter/summer) must NOT include courses that have prerequisites
-      const retakeOdd = retakeOddRaw.filter((c) => !c.prerequisiteId);
-      const retakeEven = retakeEvenRaw.filter((c) => !c.prerequisiteId);
-
-      const newOddAll = coursesBySem[currentOdd] || [];
-      const newEvenAll = coursesBySem[currentEven] || [];
-      const newOdd = newOddAll.filter((c) => !c.prerequisiteId);
-      const newEven = newEvenAll.filter((c) => !c.prerequisiteId);
+      const newOdd = coursesBySem[currentOdd] || [];
+      const newEven = coursesBySem[currentEven] || [];
 
       fillSemesterActive({
         enrollments: allEnrollments,
@@ -728,66 +722,9 @@ async function main() {
     await prisma.studentCourse.createMany({ data: allEnrollments });
   }
 
-  /* ----- Ensure no course is empty: add at least one ACTIVE enrollment per course if needed ----- */
-  const activeCounts = await prisma.studentCourse.groupBy({
-    by: ["courseId"],
-    where: { status: "ACTIVE" },
-    _count: { _all: true },
-  });
-  const activeCountByCourse = new Map(
-    activeCounts.map((c) => [c.courseId, c._count._all])
-  );
-  const coursesNeedingActive = courses.filter(
-    (c) => (activeCountByCourse.get(c.id) || 0) === 0
-  );
-
-  for (const c of coursesNeedingActive) {
-    // exclude students already linked to that course
-    const already = await prisma.studentCourse.findMany({
-      where: { courseId: c.id },
-      select: { studentId: true },
-    });
-    const excludeIds = new Set(already.map((a) => a.studentId));
-
-    // Prefer a student NOT in the same year to respect the rule
-    let candidate = await prisma.student.findFirst({
-      where: {
-        enrolledYear: { not: c.year },
-        id: { notIn: Array.from(excludeIds) },
-      },
-      select: { id: true, enrolledYear: true },
-    });
-
-    // Fallback: any student not already in the course (should be rare)
-    if (!candidate) {
-      candidate = await prisma.student.findFirst({
-        where: { id: { notIn: Array.from(excludeIds) } },
-        select: { id: true, enrolledYear: true },
-      });
-    }
-    if (!candidate) continue;
-
-    await prisma.studentCourse.create({
-      data: {
-        studentId: candidate.id,
-        courseId: c.id,
-        status: "ACTIVE",
-        assignedYear: candidate.enrolledYear,
-        assignedSemester: c.semester,
-      },
-    });
-  }
-
-  // ---- Compute per-student stats from DB and update students ----
-  const scAll = await prisma.studentCourse.findMany({
-    select: {
-      studentId: true,
-      status: true,
-      course: { select: { ects: true } },
-    },
-  });
-  const statsByStudent = new Map();
-  for (const e of scAll) {
+  // ---- Compute per-student stats from allEnrollments and update students ----
+  const statsByStudent = new Map(); // id -> {passedCount, failedCount, activeCount, totalEcts}
+  for (const e of allEnrollments) {
     const s = statsByStudent.get(e.studentId) || {
       passedCount: 0,
       failedCount: 0,
@@ -796,7 +733,7 @@ async function main() {
     };
     if (e.status === "PASSED") {
       s.passedCount += 1;
-      s.totalEcts += e.course?.ects || 0;
+      s.totalEcts += courseECTS.get(e.courseId) || 0;
     } else if (e.status === "FAILED") {
       s.failedCount += 1;
     } else if (e.status === "ACTIVE") {
@@ -805,6 +742,7 @@ async function main() {
     statsByStudent.set(e.studentId, s);
   }
 
+  // postavi statuse na Student i stats
   for (const student of students) {
     const st = statsByStudent.get(student.id) || {
       passedCount: 0,
@@ -812,18 +750,72 @@ async function main() {
       activeCount: 0,
       totalEcts: 0,
     };
-    await prisma.student.update({
-      where: { id: student.id },
-      data: {
-        totalEcts: st.totalEcts,
-        passedCount: st.passedCount,
-        failedCount: st.failedCount,
-        activeCount: st.activeCount,
-      },
-    });
+
+    if (isCompleted.has(student.id)) {
+      await prisma.student.update({
+        where: { id: student.id },
+        data: {
+          enrollmentStep: 3,
+          enrollmentYearSelected: true,
+          enrollmentCoursesSelected: true,
+          enrollmentDocumentsSubmitted: true,
+          enrollmentCompleted: true,
+          totalEcts: st.totalEcts,
+          passedCount: st.passedCount,
+          failedCount: st.failedCount,
+          activeCount: st.activeCount,
+        },
+      });
+    } else if (isStep2.has(student.id)) {
+      await prisma.student.update({
+        where: { id: student.id },
+        data: {
+          enrollmentStep: 2,
+          enrollmentYearSelected: true,
+          enrollmentCoursesSelected: true,
+          enrollmentDocumentsSubmitted: false,
+          enrollmentCompleted: false,
+          totalEcts: st.totalEcts,
+          passedCount: st.passedCount,
+          failedCount: st.failedCount,
+          activeCount: st.activeCount,
+        },
+      });
+    } else if (isStep1.has(student.id)) {
+      await prisma.student.update({
+        where: { id: student.id },
+        data: {
+          enrollmentStep: 1,
+          enrollmentYearSelected: true,
+          enrollmentCoursesSelected: false,
+          enrollmentDocumentsSubmitted: false,
+          enrollmentCompleted: false,
+          totalEcts: st.totalEcts,
+          passedCount: st.passedCount,
+          failedCount: st.failedCount,
+          activeCount: st.activeCount,
+        },
+      });
+    } else if (isStep0.has(student.id)) {
+      // ostaje na koraku 0, ali se stats ažuriraju
+      await prisma.student.update({
+        where: { id: student.id },
+        data: {
+          totalEcts: st.totalEcts,
+          passedCount: st.passedCount,
+          failedCount: st.failedCount,
+          activeCount: st.activeCount,
+        },
+      });
+    }
   }
 
-  // LOG ZA TESTIRANJE: sample course capacities + test logins
+  // LOG ZA TESTIRANJE: jedan completed i jedan step0 + sample course capacities
+  const completedStudentId = completedList[0];
+  const step0StudentId = step0List[0];
+  const completedStudent = students.find((s) => s.id === completedStudentId);
+  const step0Student = students.find((s) => s.id === step0StudentId);
+
   const sampleCaps = (
     await prisma.course.findMany({ take: 5, orderBy: { id: "asc" } })
   ).map((c) => ({ id: c.id, name: c.name, capacity: c.capacity }));
@@ -833,32 +825,26 @@ async function main() {
     "Seed završen: 36 kolegija + 100 studenata (90 completed, 5 step2, 4 step1, 1 step0) + upisi (PASSED/FAILED/ACTIVE)."
   );
 
-  const completedStudent = await prisma.student.findFirst({
-    where: { enrollmentCompleted: true },
-    select: { id: true, email: true, enrolledYear: true, module: true },
-  });
-  const step0Student = await prisma.student.findFirst({
-    where: { enrollmentStep: 0 },
-    select: { id: true, email: true, enrolledYear: true, module: true },
-  });
   if (completedStudent) {
     console.log("TEST LOGIN (COMPLETED):", {
       id: completedStudent.id,
       email: completedStudent.email,
-      password: "Lozinka123!",
+      password: plainPassword,
       enrolledYear: completedStudent.enrolledYear,
       module: completedStudent.module,
       status: "completed",
+      stats: statsByStudent.get(completedStudent.id) || {},
     });
   }
   if (step0Student) {
     console.log("TEST LOGIN (STEP 0 — no steps):", {
       id: step0Student.id,
       email: step0Student.email,
-      password: "Lozinka123!",
+      password: plainPassword,
       enrolledYear: step0Student.enrolledYear,
       module: step0Student.module,
       status: "step0",
+      stats: statsByStudent.get(step0Student.id) || {},
     });
   } else {
     console.log(
