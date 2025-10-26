@@ -53,6 +53,7 @@ router.post('/auth/register', async (req, res) => {
           enrollmentCompleted: true,
           createdAt: true,
           updatedAt: true,
+            totalEcts: true, activeCount: true, failedCount: true, passedCout: true
         },
       });
 
@@ -104,6 +105,7 @@ router.post('/auth/login', async (req, res) => {
         id: true, enrollmentCompleted: true, enrollmentCoursesSelected: true, enrollmentYearSelected: true,
         enrollmentDocumentsSubmitted: true, enrollmentStep: true, repeatingYear: true, enrolledYear: true,
         email: true, module: true, lastName: true, jmbag: true, firstName: true, documents: true, passwordHash: true,
+          failedCount: true, totalEcts: true, activeCount: true, passedCount: true
       },
     });
     if (!student) {
