@@ -9,6 +9,7 @@ const authRoutes = require('./routes/auth');
 const studentsRoutes = require('./routes/students');
 const enrollmentRoutes = require('./routes/enrollment');
 const documentsRoutes = require('./routes/documents');
+const coursesRoutes = require('./routes/courses');
 
 const app = express();
 app.use(express.json());
@@ -20,6 +21,7 @@ app.use(authRoutes);
 app.use(studentsRoutes);
 app.use(enrollmentRoutes);
 app.use(documentsRoutes);
+app.use(coursesRoutes)
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

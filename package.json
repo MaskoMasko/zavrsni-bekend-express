@@ -10,7 +10,7 @@
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "seed": "node prisma/seed.js",
-    "test": "jest",
+    "test": "PORT=3001 jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
   },

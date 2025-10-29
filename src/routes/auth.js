@@ -53,7 +53,7 @@ router.post('/auth/register', async (req, res) => {
           enrollmentCompleted: true,
           createdAt: true,
           updatedAt: true,
-            totalEcts: true, activeCount: true, failedCount: true, passedCout: true
+            totalEcts: true, activeCount: true, failedCount: true, passedCount: true
         },
       });
 

@@ -86,7 +86,7 @@ function sendActiveCoursesPdf(res, payload) {
   doc.text(`Semestri tekuće godine: Zimski ${currentYearSemesters.odd}, Ljetni ${currentYearSemesters.even}`);
   doc.moveDown();
 
-  doc.fontSize(14).text(`❄️ Zimski semestar (ECTS: ${active.winter.ects}, predmeta: ${active.winter.count})`);
+  doc.fontSize(14).text(`Zimski semestar (ECTS: ${active.winter.ects}, predmeta: ${active.winter.count})`);
   doc.moveDown(0.5);
   if (active.winter.courses.length === 0) {
     doc.fontSize(12).text('Nema aktivnih predmeta.', { indent: 20 });
@@ -100,7 +100,7 @@ function sendActiveCoursesPdf(res, payload) {
   }
   doc.moveDown();
 
-  doc.fontSize(14).text(`☀️ Ljetni semestar (ECTS: ${active.summer.ects}, predmeta: ${active.summer.count})`);
+  doc.fontSize(14).text(`Ljetni semestar (ECTS: ${active.summer.ects}, predmeta: ${active.summer.count})`);
   doc.moveDown(0.5);
   if (active.summer.courses.length === 0) {
     doc.fontSize(12).text('Nema aktivnih predmeta.', { indent: 20 });

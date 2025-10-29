@@ -9,17 +9,17 @@ describe('Enrollment Routes', () => {
 
     beforeAll(async () => {
         const registerResponse = await request(app)
-            .post('/register')
+            .post('/auth/register')
             .send({
                 firstName: 'Enrollment',
                 lastName: 'Test',
                 password: 'Test123!'
             });
 
-        testStudent = registerResponse.body.student;
+        testStudent = registerResponse.body.user;
 
         const loginResponse = await request(app)
-            .post('/login')
+            .post('/auth/login')
             .send({
                 email: 'etest1@student.edu.hr',
                 password: 'Test123!'
@@ -32,7 +32,10 @@ describe('Enrollment Routes', () => {
                 name: 'Test Course',
                 ects: 5,
                 year: 1,
-                semester: 1
+                semester: 1,
+                assistant: 'test_assistant',
+                holder: 'test_holder',
+                description: 'Test Description',
             }
         });
     });
