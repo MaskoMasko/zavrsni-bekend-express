@@ -141,6 +141,151 @@ router.get("/students/leaderboard", async (req, res) => {
   }
 });
 
+// GET /students/:id/leaderboard
+router.get("/students/:id/leaderboard", async (req, res) => {
+    const studentId = req.params.id;
+
+    try {
+        const student = await prisma.student.findUnique({
+            where: { id: Number(studentId) },
+            select: {
+                id: true,
+                jmbag: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                enrolledYear: true,
+                repeatingYear: true,
+                module: true,
+                totalEcts: true,
+                createdAt: true,
+                updatedAt: true,
+                enrollmentCompleted: true,
+            },
+        });
+
+        if (!student) {
+            return res.status(404).json({ error: "Student nije pronađen" });
+        }
+
+        if (!student.enrollmentCompleted) {
+            return res.status(400).json({
+                error: "Student nije završio upis"
+            });
+        }
+
+        const yearParam = student.enrolledYear;
+        const yearSemesters = { 1: [1, 2], 2: [3, 4], 3: [5, 6] };
+        const [oddSem, evenSem] = yearSemesters[yearParam];
+
+        const coursesThisYear = await prisma.course.findMany({
+            where: { year: yearParam },
+            select: {
+                id: true,
+                name: true,
+                ects: true,
+                semester: true,
+                year: true,
+                capacity: true,
+                holder: true,
+                holderEmail: true,
+                assistant: true,
+                assistantEmail: true,
+            },
+        });
+
+        const activeEnrollments = await prisma.studentCourse.findMany({
+            where: {
+                studentId: Number(studentId),
+                status: "ACTIVE",
+                assignedSemester: { in: [oddSem, evenSem] },
+            },
+            select: { studentId: true, courseId: true },
+        });
+
+        const groups = {};
+        const courseCapacities = {};
+
+        for (const c of coursesThisYear) {
+            groups[c.id] = {
+                course: {
+                    id: c.id,
+                    name: c.name,
+                    ects: c.ects,
+                    semester: c.semester,
+                    year: c.year,
+                    capacity: c.capacity,
+                    holder: c.holder,
+                    holderEmail: c.holderEmail || null,
+                    assistant: c.assistant || null,
+                    assistantEmail: c.assistantEmail || null,
+                },
+                students: [],
+            };
+        }
+
+        for (const e of activeEnrollments) {
+            const course = coursesThisYear.find(c => c.id === e.courseId);
+            if (course) {
+                groups[e.courseId].students.push({
+                    id: student.id,
+                    jmbag: student.jmbag,
+                    firstName: student.firstName,
+                    lastName: student.lastName,
+                    email: student.email,
+                    repeatingYear: student.repeatingYear,
+                    module: student.module,
+                    stats: { ectsPassedTotal: student.totalEcts },
+                    createdAt: student.createdAt,
+                    updatedAt: student.updatedAt,
+                });
+            }
+        }
+
+        for (const courseId of Object.keys(groups)) {
+            groups[courseId].students.sort((a, b) => {
+                const aECTS = a.stats?.ectsPassedTotal || 0;
+                const bECTS = b.stats?.ectsPassedTotal || 0;
+                if (bECTS !== aECTS) return bECTS - aECTS;
+                return a.lastName.localeCompare(b.lastName);
+            });
+
+            const max = groups[courseId].course.capacity || 0;
+            const current = groups[courseId].students.length;
+            courseCapacities[courseId] = {
+                name: groups[courseId].course.name,
+                max,
+                current,
+            };
+        }
+
+        const filteredGroups = {};
+        for (const courseId of Object.keys(groups)) {
+            if (groups[courseId].students.length > 0) {
+                filteredGroups[courseId] = groups[courseId];
+            }
+        }
+
+        res.json({
+            year: yearParam,
+            totalStudents: 1,
+            courseCapacities,
+            groups: filteredGroups,
+            studentInfo: {
+                id: student.id,
+                jmbag: student.jmbag,
+                firstName: student.firstName,
+                lastName: student.lastName,
+                enrolledYear: student.enrolledYear,
+                totalEcts: student.totalEcts
+            }
+        });
+    } catch (err) {
+        console.error("Greška /students/:id/leaderboard:", err);
+        res.status(500).json({ error: "Interna greška servera" });
+    }
+});
+
 // GET /students
 router.get("/students", async (req, res) => {
   try {

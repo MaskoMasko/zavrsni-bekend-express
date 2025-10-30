@@ -95,9 +95,9 @@ router.post('/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'email i password su obavezni' });
     }
     const normEmail = String(email).toLowerCase().trim();
-    if (!normEmail.endsWith('@student.edu.hr')) {
-      return res.status(400).json({ error: 'Email mora biti u domeni @student.edu.hr' });
-    }
+    // if (!normEmail.endsWith('@student.edu.hr')) {
+    //   return res.status(400).json({ error: 'Email mora biti u domeni @student.edu.hr' });
+    // }
 
     const student = await prisma.student.findUnique({
       where: { email: normEmail },

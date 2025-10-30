@@ -539,8 +539,39 @@ async function main() {
     for (const course of newCandidates) tryAdd(course);
   }
 
+  const adminEmail = "admin@admin.edu.hr";
   const plainPassword = "Lozinka123!";
   const passwordHash = await bcrypt.hash(plainPassword, 10);
+
+    const admin = await prisma.student.create({
+        data: {
+            jmbag: await generateUniqueJmbag(),
+            firstName: "Admin",
+            lastName: "Administrator",
+            email: adminEmail,
+            passwordHash,
+            enrolledYear: 1, // Može biti bilo koja godina, nije bitno za admina
+            repeatingYear: false,
+            module: null,
+            enrollmentStep: 3,
+            enrollmentYearSelected: true,
+            enrollmentCoursesSelected: true,
+            enrollmentDocumentsSubmitted: true,
+            enrollmentCompleted: true,
+            totalEcts: 0,
+            passedCount: 0,
+            failedCount: 0,
+            activeCount: 0,
+        },
+    });
+    console.log("ADMINISTRATOR:", {
+        id: admin.id,
+        email: admin.email,
+        password: plainPassword,
+        firstName: admin.firstName,
+        lastName: admin.lastName,
+        role: "administrator",
+    });
 
   const FIRST_NAMES = [
     "Ana",
